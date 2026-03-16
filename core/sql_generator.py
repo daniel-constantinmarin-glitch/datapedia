@@ -25,9 +25,9 @@ def generate_sql(prompt: str, schema: dict) -> str:
         return f"-- ERROR while obtaining access token: {e}"
 
     # 2. Required env vars
-    project_id = os.getenv("VERTEX_PROJECT_ID")
-    location = os.getenv("VERTEX_LOCATION")
-    model = os.getenv("VERTEX_MODEL", "gemini-1.5-pro")
+    project_id = os.getenv("VERTEX_PROJECT_ID", "datapedia-489407")
+    location = os.getenv("VERTEX_LOCATION", "us-central1")
+    model = os.getenv("VERTEX_MODEL", "gemini-2.5-pro")
 
     if not project_id or not location:
         return (
