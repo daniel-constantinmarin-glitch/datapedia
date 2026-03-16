@@ -1,0 +1,70 @@
+import os
+import json
+import vertexai
+from vertexai.generative_models import GenerativeModel
+
+
+def build_schema_summary(schema: dict) -> str:
+    """
+    Build a readable list of tables and columns for the model.
+    Example:
+        public.sales: sale_id, customer_id, ...
+    """
+    lines = []
+    for table in schema.get("tables", []):
+        table_name = table.get("id", "unknown")
+        cols = table.get("columns", [])
+        col_names = [c.get("name", "?") for c in cols]
+        lines.append(f"{table_name}: {', '.join(col_names)}")
+    return "\n".join(lines)
+
+
+def generate_sql(prompt: str, schema: dict) -> str:
+    """
+    Generate SQL using Vertex AI Gemini 2.5 Pro
+    based strictly on the schema provided.
+    """
+    project_id = os.getenv("VERTEX_PROJECT_ID")
+    location = os.getenv("VERTEX_LOCATION")
+
+    if not project_id or not location:
+        return "-- ERROR: Vertex AI environment variables not set."
+
+    try:
+        vertexai.init(project=project_id, location=location)
+        model = GenerativeModel("gemini-2.5-pro")
+    except Exception as e:
+        return f"-- ERROR initializing Vertex AI: {e}"
+
+    schema_summary = build_schema_summary(schema)
+
+    system_prompt = (
+        "You are an expert SQL generator. "
+        "You ONLY generate valid SQL based on the schema provided.\n\n"
+        "RULES:\n"
+        "1. Only use tables and columns from the schema.\n"
+        "2. Never invent table names, column names, or relationships.\n"
+        "3. Output only SQL — no explanation.\n"
+        "4. If impossible, return: NO_DATA\n"
+    )
+
+    full_prompt = (
+        f"{system_prompt}\n\n"
+        f"SCHEMA:\n{schema_summary}\n\n"
+        f"USER REQUEST:\n{prompt}\n"
+    )
+
+    try:
+        response = model.generate_content(full_prompt)
+        text = (response.text or "").strip()
+
+        if not text:
+            return "-- ERROR: Empty response from AI."
+
+        if "NO_DATA" in text.upper():
+            return "NO_DATA"
+
+        return text
+
+    except Exception as e:
+        return f"-- ERROR generating SQL: {e}"
