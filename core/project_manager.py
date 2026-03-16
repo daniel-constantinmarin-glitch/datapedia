@@ -1,15 +1,22 @@
-import json,os
+import json
+import os
+
+PROJECTS_FILE = 'projects.json'
 
 def list_projects():
- if not os.path.exists('projects.json'):return []
- with open('projects.json') as f:return json.load(f)
+    if not os.path.exists(PROJECTS_FILE):
+        return []
+    with open(PROJECTS_FILE) as f:
+        return json.load(f)
 
-def save_project(name,schema_path):
- projs=list_projects()
- projs.append({'name':name,'schema':schema_path})
- with open('projects.json','w') as f:json.dump(projs,f,indent=2)
+def save_project(name: str, schema_path: str):
+    projs = list_projects()
+    projs.append({'name': name, 'schema': schema_path})
+    with open(PROJECTS_FILE, 'w') as f:
+        json.dump(projs, f, indent=2)
 
-def load_project(name):
- for p in list_projects():
-  if p['name']==name:return p
- return None
+def load_project(name: str):
+    for p in list_projects():
+        if p["name"] == name:
+            return p
+    return None
