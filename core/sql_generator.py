@@ -59,11 +59,18 @@ def generate_sql(prompt: str, schema: dict) -> str:
         f"USER REQUEST:\n{prompt}\n"
     )
 
+    
     body = {
         "contents": [
-            {"parts": [{"text": final_prompt}]}
+            {
+                "role": "user",
+                "parts": [
+                    {"text": final_prompt}
+                ]
+            }
         ]
     }
+
 
     headers = {
         "Authorization": f"Bearer {token}",
