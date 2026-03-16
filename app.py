@@ -1,14 +1,15 @@
 
 import streamlit as st
-import os, json
+import os
 
 from core.project_manager import list_projects, save_project, load_project
 from core.schema_loader import load_schema
 from core.sql_generator import generate_sql
-from core.graph_builder import render_graph
+from core.graph_builder import render_graph  # assumed existing in your project
 
 st.set_page_config(page_title='Datapedia', layout='wide')
 
+# Tabs
 tab1, tab2, tab3, tab4 = st.tabs(["Onboarding", "Project Browser", "SQL Generator", "Graph View"])
 
 # ------------------------------------------------------
@@ -39,6 +40,7 @@ with tab1:
         elif upload.size > 5 * 1024 * 1024:
             st.error("File is too large. Max size is 5MB.")
         else:
+            # Keep the base path as you had it
             base = "/home/daniel_constantin_marin_ing_com"
             folder = os.path.join(base, name)
 
@@ -77,7 +79,7 @@ with tab2:
             proj = load_project(selected_proj)
             schema = load_schema(proj["schema"])
 
-            tables = [t["id"] for t in schema["tables"]]
+            tables = [t.get("id") or t.get("name") for t in schema.get("tables", [])]
 
             selected_table = st.selectbox(
                 "Select table",
@@ -86,8 +88,9 @@ with tab2:
             )
 
             if selected_table:
-                table = next(t for t in schema["tables"] if t["id"] == selected_table)
-                st.json(table)
+                table = next((t for t in schema.get("tables", []) if (t.get("id") or t.get("name")) == selected_table), None)
+                if table:
+                    st.json(table)
 
 
 # ------------------------------------------------------
@@ -106,6 +109,9 @@ with tab3:
             [p["name"] for p in projs],
             key="sql_proj"
         )
+
+        # Optional helper text to remind about env vars
+        st.caption("Vertex AI uses environment variables VERTEX_PROJECT_ID / VERTEX_LOCATION / VERTEX_MODEL.")
 
         prompt = st.text_area(
             "Describe your query in English",
@@ -147,4 +153,3 @@ with tab4:
             schema = load_schema(proj["schema"])
 
             render_graph(schema)
-
