@@ -213,30 +213,57 @@ def render_table_neighborhood(schema: dict, selected_table: str, height: int = 7
 
         nodes.append(node)
 
-    # ---------------------------------------------------------
-    # PATCH: FULL-WIDTH + FORCE HEIGHT for streamlit-cytoscapejs
-    # ---------------------------------------------------------
-    graph_key = f"graph_full_{selected_table or 'all'}"
 
-    if CYTO_NAME in ["st_cytoscapejs", "cytoscape_in_streamlit_cytoscapejs"]:
-        forced_height = max(height, 900)       # YOU CAN CHANGE THIS (ex. 1200)
-        anchor_id = f"cyto-anchor-{graph_key}"
+# ---------------------------------------------------------
+# PATCH: FULL-WIDTH + FORCE HEIGHT (robust) pentru streamlit-cytoscapejs
+# ---------------------------------------------------------
+graph_key = f"graph_full_{selected_table or 'all'}"
 
-        st.markdown(f"<div id='{anchor_id}'></div>", unsafe_allow_html=True)
+if CYTO_NAME in ["st_cytoscapejs", "cytoscape_in_streamlit_cytoscapejs"]:
+    forced_height = max(height, 1000)  # ↔️ înălțimea dorită (poți pune 1200/1400)
+    anchor_id = f"cyto-anchor-{graph_key}"
 
-        st.markdown(
-            f"""
-            <style>
-            div#{anchor_id} + div [data-testid="stIFrame"] {{
-                width: 100% !important;
-                min-width: 100% !important;
-                height: {forced_height}px !important;
-                min-height: {forced_height}px !important;
-            }}
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
+    # 1) Ancoră înaintea componentei; vom stiliza "următorul" container
+    st.markdown(f"<div id='{anchor_id}' class='cyto-wrap-{graph_key}'></div>", unsafe_allow_html=True)
+
+    # 2) CSS mai robust (acoperă variațiile DOM ale Streamlit)
+    st.markdown(
+        f"""
+        <style>
+          /* Asigură că div-ul imediat următor ancorei ocupă toată lățimea */
+          div#{anchor_id} + div {{
+            width: 100% !important;
+            max-width: 100% !important;
+          }}
+
+          /* Uneori Streamlit mai inserează un div intermediar */
+          div#{anchor_id} + div > div {{
+            width: 100% !important;
+            max-width: 100% !important;
+          }}
+
+          /* Țintește iFrame-ul Cytoscape (var. 1) prin data-testid */
+          div#{anchor_id} + div [data-testid="stIFrame"] {{
+            width: 100% !important;
+            min-width: 100% !important;
+            height: {forced_height}px !important;
+            min-height: {forced_height}px !important;
+            display: block !important;
+          }}
+
+          /* Țintește iFrame-ul Cytoscape (var. 2) fallback */
+          div#{anchor_id} + div iframe {{
+            width: 100% !important;
+            min-width: 100% !important;
+            height: {forced_height}px !important;
+            min-height: {forced_height}px !important;
+            display: block !important;
+          }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
 
     # ---------------------------------------------------------
     # Render graph
