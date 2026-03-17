@@ -62,6 +62,7 @@ with tab1:
 # ------------------------------------------------------
 # 2. PROJECT BROWSER TAB
 # ------------------------------------------------------
+
 with tab2:
     st.header("Project Browser")
 
@@ -80,7 +81,7 @@ with tab2:
             proj = load_project(selected_proj)
             schema = load_schema(proj["schema"])
 
-            # construim lista de tabele din cheile id/name
+            # listă de tabele din cheile id/name
             tables_raw = schema.get("tables", [])
 
             def _tbl_name(t):
@@ -99,7 +100,7 @@ with tab2:
                 table = next((t for t in tables_raw if _tbl_name(t) == selected_table), None)
 
                 if table:
-                    # --- Detalii/coloane (sus) ---
+                    # --- Columns & Types (full-width) ---
                     st.subheader(f"Columns & Types — {selected_table}")
 
                     import pandas as pd
@@ -115,7 +116,7 @@ with tab2:
                         })
                     df = pd.DataFrame(rows, columns=["column", "type", "nullable", "pk", "unique", "default"])
 
-                    # ✅ fără FutureWarning: convertim explicit la bool
+                    # ✅ Fără FutureWarning: tip boolean explicit
                     if not df.empty:
                         df["pk"] = df["pk"].astype("boolean").fillna(False)
                         df["nullable"] = df["nullable"].astype("boolean").fillna(False)
@@ -125,20 +126,18 @@ with tab2:
                         pk_cols = 0
                         nullable_cols = 0
 
-                    # ✅ Streamlit: width='stretch' (înlocuiește use_container_width)
+                    # ✅ Streamlit: width='stretch' (în loc de use_container_width)
                     st.dataframe(df, width="stretch", hide_index=True)
                     st.caption(f"Columns: **{len(df)}** · PK: **{pk_cols}** · Nullable: **{nullable_cols}**")
 
-                    # --- Control nivel BFS pentru graful de vecini ---
-                    depth = st.slider("Neighborhood depth", 1, 5, 2, key="nb_depth")
-
-                    # --- Graful (jos), pe toată lățimea paginii ---
+                    # --- Full graph (fără depth) ---
                     st.subheader("Table Neighborhood (FK links)")
                     from core.graph_builder import render_table_neighborhood
-                    # trimitem și depth; height mai înalt pentru full‑width vizibil
-                    render_table_neighborhood(schema, selected_table, depth=depth, height=680)
+                    render_table_neighborhood(schema, selected_table, height=760)
+
                 else:
                     st.warning("Selected table not found in schema.")
+
 
 
 # ------------------------------------------------------
