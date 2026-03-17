@@ -54,7 +54,7 @@ def _canon(s: Optional[str]) -> Optional[str]:
         return None
     return (
         s.strip().strip('"').strip("'").strip("`")
-        .replace("\", ".").replace("/", ".").replace(":", ".")
+        .replace("\\", ".").replace("/", ".").replace(":", ".")
         .upper()
     )
 
