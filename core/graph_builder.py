@@ -154,7 +154,7 @@ def _stylesheet() -> List[dict]:
             "style": {
                 "label": "data(label)",
                 "color": "#FFA500",                # ORANGE text ✓
-                "background-color": "#1d4f91",
+                "background-color": "#FA9B1E",
                 "font-size": 16,
                 "text-wrap": "wrap",
                 "text-max-width": 160,
