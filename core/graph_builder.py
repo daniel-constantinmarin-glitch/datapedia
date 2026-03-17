@@ -2,42 +2,50 @@
 from __future__ import annotations
 
 import time
-from typing import Dict, List, Tuple, Optional, Set
+from typing import Dict, List, Tuple, Optional, Set, Callable
 
 import streamlit as st
 
-# ---- Safe import for different builds of streamlit-cytoscapejs ----
-def _get_cytoscape_callable():
-    """
-    Try several import paths so we work with multiple package variants.
-    """
-    # 1) Most common export
+# -----------------------------------------------------------------------------
+# Locate a callable Cytoscape renderer from installed packages
+#   - Preferred: streamlit_cytoscapejs.st_cytoscapejs  (PyPI: streamlit-cytoscapejs)
+#   - Fallback : streamlit_cytoscapejs.cytoscape       (în unele fork-uri)
+#   - Fallback : st_cytoscape.cytoscape                (PyPI: st-cytoscape)
+# -----------------------------------------------------------------------------
+CYTO: Optional[Callable] = None
+CYTO_NAME: str = ""
+
+def _load_cyto() -> Tuple[Optional[Callable], str]:
+    # A) streamlit-cytoscapejs (oficial) – funcția se numește st_cytoscapejs
+    #    README/PyPI: from streamlit_cytoscapejs import st_cytoscapejs
+    try:
+        from streamlit_cytoscapejs import st_cytoscapejs  # type: ignore
+        return st_cytoscapejs, "st_cytoscapejs"
+    except Exception:
+        pass
+
+    # B) Unele fork-uri expun 'cytoscape' în același pachet
     try:
         from streamlit_cytoscapejs import cytoscape  # type: ignore
-        return cytoscape
+        return cytoscape, "cytoscape_in_streamlit_cytoscapejs"
     except Exception:
         pass
 
-    # 2) Top-level attribute on module
+    # C) Pachet alternativ: st-cytoscape → from st_cytoscape import cytoscape
     try:
-        import streamlit_cytoscapejs as m  # type: ignore
-        if hasattr(m, "cytoscape"):
-            return getattr(m, "cytoscape")
+        from st_cytoscape import cytoscape  # type: ignore
+        return cytoscape, "st_cytoscape.cytoscape"
     except Exception:
         pass
 
-    raise ImportError(
-        "Cannot locate 'cytoscape'. Install with: pip install --upgrade streamlit-cytoscapejs"
-    )
+    return None, ""
 
-CYTO = None
-try:
-    CYTO = _get_cytoscape_callable()
-except Exception as e:
-    _IMPORT_ERROR = e
-else:
-    _IMPORT_ERROR = None
-
+CYTO, CYTO_NAME = _load_cyto()
+_IMPORT_ERROR = None if CYTO else ImportError(
+    "Cannot locate a Cytoscape renderer. Install one of:\n"
+    "  pip install --upgrade streamlit-cytoscapejs\n"
+    "  # (sau) pip install st-cytoscape"
+)
 
 # -------------------- Helpers --------------------
 def _canon(s: Optional[str]) -> Optional[str]:
@@ -45,27 +53,26 @@ def _canon(s: Optional[str]) -> Optional[str]:
         return None
     return (
         s.strip().strip('"').strip("'").strip("`")
-        .replace("\\", ".")
-        .replace("/", ".")
-        .replace(":", ".")
+        .replace("\\", ".").replace("/", ".").replace(":", ".")
         .upper()
     )
 
-
-def _build_index(schema: dict) -> Tuple[Dict[str, dict], Dict[str, str], Dict[str, Set[str]], List[dict]]:
+def _build_index(schema: dict) -> Tuple[Dict[str, dict], Dict[str, str], Dict[str, Set[str]], List[dict], Dict[str, str]]:
     """
     Returnează:
       - by_id:     {table_name -> table_obj}
       - canon_map: {CANON_NAME -> original_name}
       - neighbors: {table_name -> set(vecini)}
-      - edges:     listă de muchii, fiecare cu metadata (source, target, from_col, to_col, label, id)
-    Se bazează pe cheile tale 'relations' din fiecare tabel:
+      - edges:     listă de elemente Cytoscape (edge) cu metadata în data{}
+      - edge_fk:   map id_edge -> string FK (pentru lookup rapid din selecții)
+    Se bazează pe cheile 'relations' din fiecare tabel:
       { "to": "<table>", "from_col": "<col>", "to_col": "<col>" }
     """
     by_id: Dict[str, dict] = {}
     canon_to_orig: Dict[str, str] = {}
     neighbors: Dict[str, Set[str]] = {}
     edges: List[dict] = []
+    edge_fk: Dict[str, str] = {}
 
     # Index tabele
     for t in (schema.get("tables") or []):
@@ -100,19 +107,11 @@ def _build_index(schema: dict) -> Tuple[Dict[str, dict], Dict[str, str], Dict[st
             to_col   = r.get("to_col") or "?"
             eid = f"{src_o}__{from_col}__{dst_o}__{to_col}"
             label = f"{from_col} → {to_col}"
-            edges.append(
-                {
-                    "data": {
-                        "id": eid,
-                        "source": src_o,
-                        "target": dst_o,
-                        "label": label,
-                        "fk": f"{src_o}.{from_col} → {dst_o}.{to_col}",
-                    }
-                }
-            )
+            fk_str = f"{src_o}.{from_col} → {dst_o}.{to_col}"
+            edges.append({"data": {"id": eid, "source": src_o, "target": dst_o, "label": label, "fk": fk_str}})
+            edge_fk[eid] = fk_str
 
-    return by_id, canon_to_orig, neighbors, edges
+    return by_id, canon_to_orig, neighbors, edges, edge_fk
 
 
 def _compute_levels(neighbors: Dict[str, Set[str]], center: Optional[str], max_depth: int) -> Dict[str, int]:
@@ -133,59 +132,39 @@ def _compute_levels(neighbors: Dict[str, Set[str]], center: Optional[str], max_d
     return levels
 
 
-def _build_cytoscape_elements_all(schema: dict) -> Tuple[List[dict], List[dict]]:
-    nodes = []
-    _, _, _, edges = _build_index(schema)
+def _build_nodes_all(schema: dict, levels: Dict[str, int]) -> List[dict]:
+    nodes: List[dict] = []
     for t in schema.get("tables", []):
         tid = t.get("id") or t.get("name")
         if not tid:
             continue
-        nodes.append({"data": {"id": tid, "label": tid}})
-    return nodes, edges
+        cls = "dimmed"
+        if tid in levels:
+            if   levels[tid] == 0: cls = "level0"
+            elif levels[tid] == 1: cls = "level1"
+            elif levels[tid] == 2: cls = "level2"
+            else:                  cls = "levelOther"
+        nodes.append({"data": {"id": tid, "label": tid}, "classes": cls})
+    return nodes
 
 
-def _build_cytoscape_elements_neighborhood(schema: dict, center: str) -> Tuple[List[dict], List[dict]]:
-    """
-    Construieste elementele (noduri + muchii) DOAR pentru:
-      - nodul 'center'
-      - vecinii direcți (relații IN/OUT)
-    """
-    by_id, _, neighbors, edges_all = _build_index(schema)
-    nodes = []
-
+def _build_nodes_nb(schema: dict, center: str) -> List[dict]:
+    by_id, _, neighbors, _, _ = _build_index(schema)
     if center not in by_id:
-        # fallback: nod izolat
-        return [{"data": {"id": center, "label": center}}], []
+        return [{"data": {"id": center, "label": center}, "classes": "level0"}]
 
-    # Nucleu + vecini
     neigh = set(neighbors.get(center, set()))
-    sub_nodes = {center} | neigh
-
-    # Noduri cu culori: center = galben, vecini = verde
-    for n in sub_nodes:
-        color_cls = "level0" if n == center else "level1"
-        nodes.append({"data": {"id": n, "label": n}, "classes": color_cls})
-
-    # Muchii doar între nodurile selectate
-    sub_edges = []
-    for e in edges_all:
-        src = e["data"]["source"]
-        dst = e["data"]["target"]
-        if src in sub_nodes and dst in sub_nodes:
-            sub_edges.append(e)
-
-    return nodes, sub_edges
+    nodes: List[dict] = [{"data": {"id": center, "label": center}, "classes": "level0"}]
+    for n in sorted(neigh):
+        nodes.append({"data": {"id": n, "label": n}, "classes": "level1"})
+    return nodes
 
 
 def _stylesheet() -> List[dict]:
     return [
         {"selector": "node", "style": {
-            "label": "data(label)",
-            "background-color": "#4A90E2",
-            "color": "#fff",
-            "font-size": 10,
-            "shape": "round-rectangle",
-            "padding": 8,
+            "label": "data(label)", "background-color": "#4A90E2",
+            "color": "#fff", "font-size": 10, "shape": "round-rectangle", "padding": 8,
         }},
         {"selector": ".level0", "style": {"background-color": "#FFC107", "color": "#111", "border-width": 2}},
         {"selector": ".level1", "style": {"background-color": "#06d6a0"}},
@@ -193,101 +172,88 @@ def _stylesheet() -> List[dict]:
         {"selector": ".levelOther", "style": {"background-color": "#607D8B"}},
         {"selector": ".dimmed", "style": {"opacity": 0.35}},
         {"selector": "edge", "style": {
-            "curve-style": "bezier",
-            "target-arrow-shape": "triangle",
-            "label": "data(label)",
-            "font-size": 8,
+            "curve-style": "bezier", "target-arrow-shape": "triangle",
+            "label": "data(label)", "font-size": 8,
         }},
         {"selector": ":selected", "style": {"border-width": 3, "border-color": "#6bb1ff"}},
     ]
 
 
+# -----------------------------------------------------------------------------
+# NOTE despre evenimente:
+#   st_cytoscapejs(...) returnează un dict cu "nodes" și "edges" SELECTATE
+#   (nu "tap"/"dbltap"). Simulăm "dbl-click" comparând selecția curentă cu ultima.
+# -----------------------------------------------------------------------------
+def _call_cyto(elements: List[dict], stylesheet: List[dict], width: str, height: str, layout: dict, key: str):
+    if CYTO_NAME in ("st_cytoscapejs", "cytoscape_in_streamlit_cytoscapejs"):
+        # API-ul principal acceptă elements, stylesheet, apoi opționale
+        return CYTO(elements, stylesheet, width=width, height=height, layout=layout, key=key)  # type: ignore
+    elif CYTO_NAME == "st_cytoscape.cytoscape":
+        # pachetul alternativ are aceleași argumente, dar acceptă de obicei și keywords
+        return CYTO(elements, stylesheet, width=width, height=height, layout=layout, key=key)  # type: ignore
+    else:
+        raise RuntimeError("No Cytoscape renderer available.")
+
+
 # -------------------- Public API --------------------
 def render_graph(schema: dict) -> None:
-    """
-    Vizualizare globală (ca în varianta ta originală), cu:
-      - slider BFS depth,
-      - click pe nod: focus center,
-      - dbl-click pe nod: modal cu coloane,
-      - click pe muchie: info FK.
-    """
     if _IMPORT_ERROR is not None:
-        st.error(
-            f"streamlit-cytoscapejs is not available: {_IMPORT_ERROR}. "
-            "Run: pip install --upgrade streamlit-cytoscapejs"
-        )
+        st.error(str(_IMPORT_ERROR))
         return
 
-    by_id, _, neighbors, _ = _build_index(schema)
+    by_id, _, neighbors, edges, edge_fk = _build_index(schema)
 
-    # persistent state
+    # state persistent
     st.session_state.setdefault("graph_center_table", None)
-    st.session_state.setdefault("graph_last_click_id", None)
-    st.session_state.setdefault("graph_last_click_ts", 0.0)
+    st.session_state.setdefault("graph_last_node_sel", [])   # list of ids
+    st.session_state.setdefault("graph_last_ts", 0.0)
     st.session_state.setdefault("graph_modal_for", None)
     st.session_state.setdefault("graph_depth", 2)
 
-    st.caption("Click a node to focus; double-click to open table columns; click an edge to see FK info.")
+    st.caption("Click nodes/edges to select; double-click a node (rapid select twice) to open columns; click an edge to show FK.")
 
     st.session_state["graph_depth"] = st.slider(
-        "BFS depth",
-        1, 5,
-        st.session_state["graph_depth"],
-        key="graph_depth_slider"
+        "BFS depth", 1, 5, st.session_state["graph_depth"], key="graph_depth_slider"
     )
 
-    nodes, edges = _build_cytoscape_elements_all(schema)
     levels = _compute_levels(neighbors, st.session_state["graph_center_table"], st.session_state["graph_depth"])
+    nodes = _build_nodes_all(schema, levels)
 
-    # stilizare pe niveluri
-    for n in nodes:
-        nid = n["data"]["id"]
-        lvl = levels.get(nid)
-        if lvl is None:
-            n["classes"] = "dimmed"
-        elif lvl == 0:
-            n["classes"] = "level0"
-        elif lvl == 1:
-            n["classes"] = "level1"
-        elif lvl == 2:
-            n["classes"] = "level2"
-        else:
-            n["classes"] = "levelOther"
-
-    event = CYTO(
+    result = _call_cyto(
         elements=nodes + edges,
-        layout={"name": "breadthfirst", "directed": True, "padding": 30},
         stylesheet=_stylesheet(),
-        height="600px",
         width="100%",
+        height="600px",
+        layout={"name": "breadthfirst", "directed": True, "padding": 30},
         key="graph_cyto"
     )
 
-    # Evenimente
-    if event:
-        ev = event.get("event") or event.get("type")
-        etype = event.get("type")
-        data = event.get("data", {})
+    # ----- Interpretare selecție (st_cytoscapejs) -----
+    if isinstance(result, dict):
+        sel_nodes = result.get("nodes") or []
+        sel_edges = result.get("edges") or []
 
-        if etype == "edge" and ev in ("tap", "click", "select"):
-            st.info(f"Foreign Key: {data.get('fk') or data.get('label')}")
+        # focus pe primul nod selectat
+        if sel_nodes:
+            st.session_state["graph_center_table"] = sel_nodes[0]
 
-        if etype == "node" and ev in ("tap", "click", "select", "dbltap", "doubleTap"):
-            node_id = data.get("id")
-            now = time.time()
-            last_id = st.session_state["graph_last_click_id"]
-            last_ts = st.session_state["graph_last_click_ts"]
+        # dbl-click: dacă același nod este selectat de 2 ori în < 0.6s
+        now = time.time()
+        last_nodes = st.session_state["graph_last_node_sel"]
+        if sel_nodes and last_nodes == sel_nodes and (now - st.session_state["graph_last_ts"]) <= 0.6:
+            st.session_state["graph_modal_for"] = sel_nodes[0]
 
-            if node_id and ev in ("tap", "click", "select"):
-                st.session_state["graph_center_table"] = node_id
+        st.session_state["graph_last_node_sel"] = sel_nodes
+        st.session_state["graph_last_ts"] = now
 
-            if node_id and last_id == node_id and (now - last_ts) <= 0.6:
-                st.session_state["graph_modal_for"] = node_id
+        # click pe muchie → afișează FK
+        if sel_edges:
+            eid = sel_edges[0]
+            fk_info = edge_fk.get(eid)
+            if fk_info:
+                st.info(f"Foreign Key: {fk_info}")
 
-            st.session_state["graph_last_click_id"] = node_id
-            st.session_state["graph_last_click_ts"] = now
-
-    # Modal columne tabel
+    # Modal cu coloane pentru nodul selectat
     if st.session_state["graph_modal_for"]:
         tid = st.session_state["graph_modal_for"]
         t = by_id.get(tid)
@@ -300,11 +266,9 @@ def render_graph(schema: dict) -> None:
                         "Type": c.get("type") or c.get("data_type") or "",
                         "Nullable": "YES" if c.get("nullable", True) else "NO",
                         "PK": "YES" if (c.get("pk") or c.get("primary_key")) else "NO"
-                    }
-                    for c in cols
+                    } for c in cols
                 ]
                 st.dataframe(rows, use_container_width=True, hide_index=True)
-
                 if st.button("Close", key="graph_modal_close_btn", use_container_width=True):
                     st.session_state["graph_modal_for"] = None
         else:
@@ -312,61 +276,55 @@ def render_graph(schema: dict) -> None:
 
 
 def render_table_neighborhood(schema: dict, selected_table: str, height: int = 520) -> None:
-    """
-    Vizualizare centrată pe tabela selectată în tab-ul Project Browser:
-      - nod central (galben),
-      - vecini direcți (verde),
-      - muchii IN/OUT cu etichete from_col → to_col,
-      - click edge => FK info, dbl-click node => modal cu coloane (aceeași logică).
-    """
     if _IMPORT_ERROR is not None:
-        st.error(
-            f"streamlit-cytoscapejs is not available: {_IMPORT_ERROR}. "
-            "Run: pip install --upgrade streamlit-cytoscapejs"
-        )
+        st.error(str(_IMPORT_ERROR))
         return
 
-    by_id, _, _, _ = _build_index(schema)
+    by_id, _, neighbors, edges_all, edge_fk = _build_index(schema)
 
-    # Construiește subgraful pentru selected_table
-    nodes, edges = _build_cytoscape_elements_neighborhood(schema, selected_table)
+    # noduri: selected + vecinii direcți
+    if selected_table not in by_id:
+        nodes = [{"data": {"id": selected_table, "label": selected_table}, "classes": "level0"}]
+        edges = []
+    else:
+        neigh = set(neighbors.get(selected_table, set()))
+        nodes = [{"data": {"id": selected_table, "label": selected_table}, "classes": "level0"}]
+        for n in sorted(neigh):
+            nodes.append({"data": {"id": n, "label": n}, "classes": "level1"})
+        # păstrează doar muchiile între nodurile din subgraf
+        keep = {n["data"]["id"] for n in nodes}
+        edges = [e for e in edges_all if e["data"]["source"] in keep and e["data"]["target"] in keep]
 
-    # State local pentru modal în acest view
-    st.session_state.setdefault("nb_last_click_id", None)
-    st.session_state.setdefault("nb_last_click_ts", 0.0)
+    # state local pentru neighborhood
+    st.session_state.setdefault("nb_last_node_sel", [])
+    st.session_state.setdefault("nb_last_ts", 0.0)
     st.session_state.setdefault("nb_modal_for", None)
 
-    event = CYTO(
+    result = _call_cyto(
         elements=nodes + edges,
-        layout={"name": "breadthfirst", "directed": True, "padding": 25, "roots": f"[id = '{selected_table}']"},
         stylesheet=_stylesheet(),
-        height=f"{height}px",
         width="100%",
+        height=f"{height}px",
+        layout={"name": "breadthfirst", "directed": True, "padding": 25, "roots": f"[id = '{selected_table}']"},
         key=f"graph_cyto_nb_{selected_table}"
     )
 
-    # Evenimente similare cu render_graph
-    if event:
-        ev = event.get("event") or event.get("type")
-        etype = event.get("type")
-        data = event.get("data", {})
+    if isinstance(result, dict):
+        sel_nodes = result.get("nodes") or []
+        sel_edges = result.get("edges") or []
 
-        if etype == "edge" and ev in ("tap", "click", "select"):
-            st.info(f"Foreign Key: {data.get('fk') or data.get('label')}")
+        now = time.time()
+        last_nodes = st.session_state["nb_last_node_sel"]
+        if sel_nodes and last_nodes == sel_nodes and (now - st.session_state["nb_last_ts"]) <= 0.6:
+            st.session_state["nb_modal_for"] = sel_nodes[0]
+        st.session_state["nb_last_node_sel"] = sel_nodes
+        st.session_state["nb_last_ts"] = now
 
-        if etype == "node" and ev in ("tap", "click", "select", "dbltap", "doubleTap"):
-            node_id = data.get("id")
-            now = time.time()
-            last_id = st.session_state["nb_last_click_id"]
-            last_ts = st.session_state["nb_last_click_ts"]
+        if sel_edges:
+            fk_info = edge_fk.get(sel_edges[0])
+            if fk_info:
+                st.info(f"Foreign Key: {fk_info}")
 
-            if node_id and last_id == node_id and (now - last_ts) <= 0.6:
-                st.session_state["nb_modal_for"] = node_id
-
-            st.session_state["nb_last_click_id"] = node_id
-            st.session_state["nb_last_click_ts"] = now
-
-    # Modal columne tabel (pentru neighborhood view)
     if st.session_state["nb_modal_for"]:
         tid = st.session_state["nb_modal_for"]
         t = by_id.get(tid)
@@ -379,11 +337,9 @@ def render_table_neighborhood(schema: dict, selected_table: str, height: int = 5
                         "Type": c.get("type") or c.get("data_type") or "",
                         "Nullable": "YES" if c.get("nullable", True) else "NO",
                         "PK": "YES" if (c.get("pk") or c.get("primary_key")) else "NO"
-                    }
-                    for c in cols
+                    } for c in cols
                 ]
                 st.dataframe(rows, use_container_width=True, hide_index=True)
-
                 if st.button("Close", key="nb_modal_close_btn", use_container_width=True):
                     st.session_state["nb_modal_for"] = None
         else:
