@@ -79,7 +79,13 @@ with tab2:
             proj = load_project(selected_proj)
             schema = load_schema(proj["schema"])
 
-            tables = [t.get("id") or t.get("name") for t in schema.get("tables", [])]
+            # construim lista de tabele din cheile id/name
+            tables_raw = schema.get("tables", [])
+
+            def _tbl_name(t):
+                return t.get("id") or t.get("name") or "<unnamed>"
+
+            tables = sorted({_tbl_name(t) for t in tables_raw})
 
             selected_table = st.selectbox(
                 "Select table",
@@ -88,9 +94,46 @@ with tab2:
             )
 
             if selected_table:
-                table = next((t for t in schema.get("tables", []) if (t.get("id") or t.get("name")) == selected_table), None)
+                # găsește obiectul tabel
+                table = next((t for t in tables_raw if _tbl_name(t) == selected_table), None)
+
                 if table:
-                    st.json(table)
+                    # Layout: stânga = detalii/coloane, dreapta = graf vecini
+                    left, right = st.columns([1, 2], gap="large")
+
+                    with left:
+                        st.subheader(f"Columns & Types — {selected_table}")
+
+                        # Tabel structurat cu informații despre coloane
+                        import pandas as pd
+
+                        rows = []
+                        for c in table.get("columns", []):
+                            rows.append({
+                                "column":  c.get("name", "?"),
+                                "type":    c.get("type") or c.get("data_type") or "",
+                                "nullable": c.get("nullable"),
+                                "pk":      c.get("pk") or c.get("primary_key"),
+                                "unique":  c.get("unique"),
+                                "default": c.get("default")
+                            })
+                        df = pd.DataFrame(rows, columns=["column", "type", "nullable", "pk", "unique", "default"])
+                        st.dataframe(df, use_container_width=True, hide_index=True)
+
+                        # Mic sumar
+                        total_cols = len(df)
+                        pk_cols = int(df["pk"].fillna(False).sum()) if not df.empty else 0
+                        nullable_cols = int(df["nullable"].fillna(False).sum()) if not df.empty else 0
+                        st.caption(f"Columns: **{total_cols}** · PK: **{pk_cols}** · Nullable: **{nullable_cols}**")
+
+                    with right:
+                        st.subheader("Table Neighborhood (FK links)")
+                        # Graful interactiv al vecinilor tabelei selectate
+                        from core.graph_builder import render_table_neighborhood
+                        render_table_neighborhood(schema, selected_table, height=520)
+
+                else:
+                    st.warning("Selected table not found in schema.")
 
 
 # ------------------------------------------------------
