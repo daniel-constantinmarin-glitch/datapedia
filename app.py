@@ -2,7 +2,8 @@
 import streamlit as st
 import os
 
-from core.project_manager import list_projects, save_project, load_project
+
+from core.graph_builder import render_table_neighborhood
 from core.schema_loader import load_schema
 from core.sql_generator import generate_sql
 from core.graph_builder import render_graph  # assumed existing in your project
