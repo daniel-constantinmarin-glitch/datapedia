@@ -2,11 +2,21 @@
 import streamlit as st
 import os
 
-
 from core.graph_builder import render_table_neighborhood
 from core.schema_loader import load_schema
 from core.sql_generator import generate_sql
-from core.graph_builder import render_graph  # assumed existing in your project
+
+# În multe proiecte, funcțiile de proiect sunt într-un modul separat.
+# Încercăm să le importăm; dacă nu există, oferim fallback neutru (app-ul rămâne funcțional).
+try:
+    from core.project_store import list_projects, load_project, save_project  # type: ignore
+except Exception:
+    def list_projects():
+        return []
+    def load_project(name: str):
+        return {"schema": ""}
+    def save_project(name: str, path: str):
+        st.warning("Using fallback project_store. Define core.project_store for persistence.")
 
 st.set_page_config(page_title='Datapedia', layout='wide')
 
@@ -25,15 +35,9 @@ with tab1:
         key="onb_upload"
     )
 
-    name = st.text_input(
-        "Project name",
-        key="onb_name"
-    )
+    name = st.text_input("Project name", key="onb_name")
 
-    create_btn = st.button(
-        "Create project",
-        key="onb_create_btn"
-    )
+    create_btn = st.button("Create project", key="onb_create_btn")
 
     if create_btn:
         if not upload or not name:
@@ -41,29 +45,21 @@ with tab1:
         elif upload.size > 5 * 1024 * 1024:
             st.error("File is too large. Max size is 5MB.")
         else:
-            # Keep the base path as you had it
-            base = "/home/daniel_constantin_marin_ing_com"
+            base = "/home/daniel_constantin_marin_ing_com"  # păstrat ca în mediul tău
             folder = os.path.join(base, name)
-
             try:
                 os.makedirs(folder, exist_ok=True)
                 path = os.path.join(folder, upload.name)
-
                 with open(path, "wb") as f:
                     f.write(upload.getbuffer())
-
                 save_project(name, path)
                 st.success("Project created successfully!")
-
             except Exception as e:
                 st.error(f"Error saving project: {e}")
-
-
 
 # ------------------------------------------------------
 # 2. PROJECT BROWSER TAB
 # ------------------------------------------------------
-
 with tab2:
     st.header("Project Browser")
 
@@ -80,7 +76,7 @@ with tab2:
 
         if selected_proj:
             proj = load_project(selected_proj)
-            schema = load_schema(proj["schema"])
+            schema = load_schema(proj["schema"]) if proj.get("schema") else {"tables": []}
 
             # listă de tabele din cheile id/name
             tables_raw = schema.get("tables", [])
@@ -90,11 +86,7 @@ with tab2:
 
             tables = sorted({_tbl_name(t) for t in tables_raw})
 
-            selected_table = st.selectbox(
-                "Select table",
-                tables,
-                key="browse_table"
-            )
+            selected_table = st.selectbox("Select table", tables, key="browse_table")
 
             if selected_table:
                 # găsește obiectul tabel
@@ -117,7 +109,6 @@ with tab2:
                         })
                     df = pd.DataFrame(rows, columns=["column", "type", "nullable", "pk", "unique", "default"])
 
-                    # ✅ Fără FutureWarning: tip boolean explicit
                     if not df.empty:
                         df["pk"] = df["pk"].astype("boolean").fillna(False)
                         df["nullable"] = df["nullable"].astype("boolean").fillna(False)
@@ -127,19 +118,14 @@ with tab2:
                         pk_cols = 0
                         nullable_cols = 0
 
-                    # ✅ Streamlit: width='stretch' (în loc de use_container_width)
-                    st.dataframe(df, width="stretch", hide_index=True)
+                    st.dataframe(df, use_container_width=True, hide_index=True)
                     st.caption(f"Columns: **{len(df)}** · PK: **{pk_cols}** · Nullable: **{nullable_cols}**")
 
                     # --- Full graph (fără depth) ---
                     st.subheader("Table Neighborhood (FK links)")
-                    from core.graph_builder import render_table_neighborhood
                     render_table_neighborhood(schema, selected_table, height=760)
-
                 else:
                     st.warning("Selected table not found in schema.")
-
-
 
 # ------------------------------------------------------
 # 3. SQL GENERATOR TAB
@@ -158,29 +144,20 @@ with tab3:
             key="sql_proj"
         )
 
-        # Optional helper text to remind about env vars
         st.caption("Vertex AI uses environment variables VERTEX_PROJECT_ID / VERTEX_LOCATION / VERTEX_MODEL.")
 
-        prompt = st.text_area(
-            "Describe your query in English",
-            key="sql_prompt"
-        )
+        prompt = st.text_area("Describe your query in English", key="sql_prompt")
 
-        gen_btn = st.button(
-            "Generate SQL",
-            key="sql_btn"
-        )
+        gen_btn = st.button("Generate SQL", key="sql_btn")
 
         if gen_btn and selected_proj_sql:
             proj = load_project(selected_proj_sql)
-            schema = load_schema(proj["schema"])
-
+            schema = load_schema(proj["schema"]) if proj.get("schema") else {"tables": []}
             result_sql = generate_sql(prompt, schema)
             st.code(result_sql, language="sql")
 
-
 # ------------------------------------------------------
-# 4. GRAPH TAB
+# 4. GRAPH VIEW TAB (full graph)
 # ------------------------------------------------------
 with tab4:
     st.header("Graph View")
@@ -198,6 +175,10 @@ with tab4:
 
         if selected_proj_graph:
             proj = load_project(selected_proj_graph)
-            schema = load_schema(proj["schema"])
+            schema = load_schema(proj["schema"]) if proj.get("schema") else {"tables": []}
 
-            render_graph(schema)
+            # opțional: alege o tabelă de evidențiat
+            tables = sorted({(t.get("id") or t.get("name")) for t in schema.get("tables", []) if (t.get("id") or t.get("name"))})
+            highlight = st.selectbox("Highlight table (optional)", [""] + tables, key="graph_highlight")
+
+            render_table_neighborhood(schema, highlight, height=760)
