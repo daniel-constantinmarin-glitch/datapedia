@@ -1,4 +1,3 @@
-
 # =====================================================================
 #  core/graph_builder.py — full graph, full width, orange labels, dispersed
 # =====================================================================
@@ -14,19 +13,16 @@ CYTO: Optional[Callable] = None
 CYTO_NAME: str = ""
 
 def _load_cyto() -> Tuple[Optional[Callable], str]:
-    # A) streamlit-cytoscapejs (API: st_cytoscapejs(elements, stylesheet, key=...))
     try:
         from streamlit_cytoscapejs import st_cytoscapejs  # type: ignore
         return st_cytoscapejs, "st_cytoscapejs"
     except Exception:
         pass
-    # B) anumite fork-uri: streamlit_cytoscapejs.cytoscape(...)
     try:
         from streamlit_cytoscapejs import cytoscape  # type: ignore
         return cytoscape, "cytoscape_in_streamlit_cytoscapejs"
     except Exception:
         pass
-    # C) pachet alternativ: st-cytoscape (API extins)
     try:
         from st_cytoscape import cytoscape  # type: ignore
         return cytoscape, "st_cytoscape.cytoscape"
@@ -57,21 +53,12 @@ def _canon(s: Optional[str]) -> Optional[str]:
     )
 
 def _build_index(schema: dict):
-    """
-    Return:
-      - by_id       : {table_name -> table_obj}
-      - canon_to_orig: {CANON -> original}
-      - neighbors   : {table -> set(neighbors)}
-      - edges       : list of Cytoscape edges (with labels)
-      - edge_fk     : {edge_id -> FK string}
-    """
     by_id: Dict[str, dict] = {}
     canon_to_orig: Dict[str, str] = {}
     neighbors: Dict[str, Set[str]] = {}
     edges: List[dict] = []
     edge_fk: Dict[str, str] = {}
 
-    # Index tables
     for t in (schema.get("tables") or []):
         tid = t.get("id") or t.get("name")
         if not tid:
@@ -85,7 +72,6 @@ def _build_index(schema: dict):
 
     neighbors = {tid: set() for tid in by_id.keys()}
 
-    # Build edges + neighbors
     for t in by_id.values():
         src = t.get("id") or t.get("name")
         for r in (t.get("relations") or []):
@@ -117,14 +103,9 @@ def _build_index(schema: dict):
     return by_id, canon_to_orig, neighbors, edges, edge_fk
 
 def _scatter_positions(ids: List[str], radius_step: int = 180) -> Dict[str, Dict[str, float]]:
-    """
-    Returnează o poziționare deterministă în cerc pentru fiecare id.
-    Scop: 'preset positions' pentru streamlit-cytoscapejs, ca nodurile
-    să fie dispersate de la început fără a trece 'layout' în apel.
-    """
     n = max(1, len(ids))
-    # concentric dacă sunt multe noduri: creștem raza gradual
     positions: Dict[str, Dict[str, float]] = {}
+
     per_ring = max(8, min(24, int(2*math.sqrt(n))))
     ring_index = 0
     idx_on_ring = 0
@@ -153,7 +134,7 @@ def _stylesheet() -> List[dict]:
             "selector": "node",
             "style": {
                 "label": "data(label)",
-                "color": "#FFA500",                # ORANGE text ✓
+                "color": "#FFA500",
                 "background-color": "#FA9B1E",
                 "font-size": 16,
                 "text-wrap": "wrap",
@@ -168,7 +149,7 @@ def _stylesheet() -> List[dict]:
             "selector": ".selectedTable",
             "style": {
                 "background-color": "#FFC107",
-                "color": "#000000",
+                "color": "#000",
                 "border-width": 4,
                 "border-color": "#000",
             },
@@ -198,17 +179,11 @@ def _stylesheet() -> List[dict]:
 # =====================================================================
 
 def _call_cyto(elements, stylesheet, key, height="700px"):
-    """
-    - pentru 'st_cytoscapejs' : NU trimitem layout (API nu suportă). Ne bazăm pe poziții presetate.
-    - pentru 'st_cytoscape.cytoscape' : trimitem layout 'cose' ca să împrăștie nodurile.
-    """
     if CYTO_NAME in ["st_cytoscapejs", "cytoscape_in_streamlit_cytoscapejs"]:
-        # API: st_cytoscapejs(elements, stylesheet, key=...)
-        return CYTO(elements=elements, stylesheet=stylesheet, key=key)  # type: ignore
+        return CYTO(elements=elements, stylesheet=stylesheet, key=key)  # no height/layout support
     elif CYTO_NAME == "st_cytoscape.cytoscape":
-        # API extins: cytoscape(elements, stylesheet, width, height, layout, key)
         return CYTO(elements, stylesheet, width="100%", height=height,
-                    layout={"name": "cose"}, key=key)  # type: ignore
+                    layout={"name": "cose"}, key=key)
     else:
         raise RuntimeError("No Cytoscape renderer available.")
 
@@ -223,46 +198,70 @@ def render_table_neighborhood(schema: dict, selected_table: str, height: int = 7
 
     by_id, _, _, edges, edge_fk = _build_index(schema)
 
-    # --- nodes ---
     node_ids = list(by_id.keys())
-    nodes: List[dict] = []
     preset_pos = _scatter_positions(node_ids)
+    nodes: List[dict] = []
 
     for tid in node_ids:
         cls = "selectedTable" if selected_table and tid == selected_table else ""
-        node = {
-            "data": {"id": tid, "label": tid},
-            "classes": cls
-        }
-        # Pentru st_cytoscapejs NU putem trimite layout -> folosim poziții presetate
+        node = {"data": {"id": tid, "label": tid}, "classes": cls}
+
         if CYTO_NAME in ["st_cytoscapejs", "cytoscape_in_streamlit_cytoscapejs"]:
-            node["position"] = preset_pos[tid]               # <- preset positions ✓
+            node["position"] = preset_pos[tid]
             node["grabbable"] = True
             node["locked"] = False
+
         nodes.append(node)
 
-    # ***** CONTAINER FULL-WIDTH & ALINIAT CORECT *****
+    # ---------------------------------------------------------
+    # PATCH: FULL-WIDTH + FORCE HEIGHT for streamlit-cytoscapejs
+    # ---------------------------------------------------------
+    graph_key = f"graph_full_{selected_table or 'all'}"
+
+    if CYTO_NAME in ["st_cytoscapejs", "cytoscape_in_streamlit_cytoscapejs"]:
+        forced_height = max(height, 900)       # YOU CAN CHANGE THIS (ex. 1200)
+        anchor_id = f"cyto-anchor-{graph_key}"
+
+        st.markdown(f"<div id='{anchor_id}'></div>", unsafe_allow_html=True)
+
+        st.markdown(
+            f"""
+            <style>
+            div#{anchor_id} + div [data-testid="stIFrame"] {{
+                width: 100% !important;
+                min-width: 100% !important;
+                height: {forced_height}px !important;
+                min-height: {forced_height}px !important;
+            }}
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    # ---------------------------------------------------------
+    # Render graph
+    # ---------------------------------------------------------
     with st.container():
         result = _call_cyto(
             elements=nodes + edges,
             stylesheet=_stylesheet(),
-            key=f"graph_full_{selected_table or 'all'}",
-            height=f"{height}px",
+            key=graph_key,
+            height=f"{max(height,900)}px",
         )
 
-    # ========== HANDLE EVENTS ==========
+    # =================================================================
+    # INTERACTIONS
+    # =================================================================
     if isinstance(result, dict):
         sel_nodes = result.get("nodes") or []
         sel_edges = result.get("edges") or []
 
-        # Click edge => show FK
         if sel_edges:
             eid = sel_edges[0]
             fk = edge_fk.get(eid)
             if fk:
                 st.info(f"Foreign Key: {fk}")
 
-        # Double click node (simulate): two selections within 0.6s
         st.session_state.setdefault("nb_last_nodes", [])
         st.session_state.setdefault("nb_ts", 0.0)
         st.session_state.setdefault("nb_modal_for", None)
@@ -272,6 +271,7 @@ def render_table_neighborhood(schema: dict, selected_table: str, height: int = 7
             last = st.session_state["nb_last_nodes"]
             if last == sel_nodes and (now - st.session_state["nb_ts"]) <= 0.6:
                 st.session_state["nb_modal_for"] = sel_nodes[0]
+
             st.session_state["nb_last_nodes"] = sel_nodes
             st.session_state["nb_ts"] = now
 
@@ -288,6 +288,8 @@ def render_table_neighborhood(schema: dict, selected_table: str, height: int = 7
                     }
                     for c in (t.get("columns") or [])
                 ]
+
                 st.dataframe(rows, use_container_width=True, hide_index=True)
+
                 if st.button("Close"):
                     st.session_state["nb_modal_for"] = None
