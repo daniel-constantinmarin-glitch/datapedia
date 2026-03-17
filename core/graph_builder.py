@@ -285,19 +285,115 @@ def render_graph(schema: dict) -> None:
 
 
 
-def render_table_neighborhood(schema: dict, selected_table: str, depth: int = 2, height: int = 680) -> None:
+def render_table_neighborhood(schema: dict, selected_table: str, height: int = 760) -> None:
     """
-    Vizualizare centrată pe tabela selectată, cu BFS până la 'depth':
-      - include nodul central și TOATE nodurile ajunse prin relații până la adâncimea cerută,
-      - colorează pe niveluri (level0/1/2/Other),
-      - click pe edge => FK info, select dublu rapid pe nod => modal cu coloane.
+    Afișează TOT graful bazei de date:
+      - fiecare tabel este un nod
+      - fiecare FK este o muchie
+      - fără BFS / fără depth / fără focus
+      - graful ocupă toată lățimea ecranului
+    """
 
-    NOTĂ: 'streamlit-cytoscapejs' nu acceptă layout/width/height ca argumente; componenta se întinde
-    pe lățimea containerului Streamlit (pagina ta e în layout 'wide'), iar înălțimea depinde de CSS-ul intern.
-    """
     if _IMPORT_ERROR is not None:
         st.error(str(_IMPORT_ERROR))
         return
+
+    # --------------------------------------
+    # 1. Construim toate nodurile
+    # --------------------------------------
+    nodes = []
+    for t in schema.get("tables", []):
+        tid = t.get("id") or t.get("name")
+        if not tid:
+            continue
+
+        # toate nodurile uniform, dar tabela selectată iese în evidență
+        cls = "level0" if tid == selected_table else "level1"
+        nodes.append({
+            "data": {"id": tid, "label": tid},
+            "classes": cls
+        })
+
+    # --------------------------------------
+    # 2. Construim toate muchiile (FK)
+    # --------------------------------------
+    by_id, canon_map, neighbors, edges_all, edge_fk = _build_index(schema)
+    edges = edges_all  # deja sunt toate
+
+    # --------------------------------------
+    # 3. State pentru click/dbl-click
+    # --------------------------------------
+    st.session_state.setdefault("nb_last_node_sel", [])
+    st.session_state.setdefault("nb_last_ts", 0.0)
+    st.session_state.setdefault("nb_modal_for", None)
+
+    # --------------------------------------
+    # 4. Apelăm cytoscape
+    #    streamlit-cytoscapejs *nu suportă* width/layout/height ca argumente,
+    #    deci îl plasăm într-un container full-width Streamlit.
+    # --------------------------------------
+    st.markdown(
+        "<div style='width:100%;'>",
+        unsafe_allow_html=True
+    )
+
+    result = _call_cyto(
+        elements=nodes + edges,
+        stylesheet=_stylesheet(),
+        width="100%",          # ignorat intern, dar ok pt compatibilitate
+        height=f"{height}px",  # idem
+        layout={},             # ignorat pentru streamlit-cytoscapejs
+        key=f"graph_full_schema_{selected_table}"
+    )
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # --------------------------------------
+    # 5. Interpretare selecție
+    # --------------------------------------
+    if isinstance(result, dict):
+        sel_nodes = result.get("nodes") or []
+        sel_edges = result.get("edges") or []
+
+        now = time.time()
+        last_nodes = st.session_state["nb_last_node_sel"]
+
+        # dublu-select rapid => modal coloană
+        if sel_nodes and last_nodes == sel_nodes and (now - st.session_state["nb_last_ts"]) <= 0.6:
+            st.session_state["nb_modal_for"] = sel_nodes[0]
+
+        st.session_state["nb_last_node_sel"] = sel_nodes
+        st.session_state["nb_last_ts"] = now
+
+        # click pe muchie → afișează FK
+        if sel_edges:
+            fk_info = edge_fk.get(sel_edges[0])
+            if fk_info:
+                st.info(f"Foreign Key: {fk_info}")
+
+    # --------------------------------------
+    # 6. Modal cu coloane pentru nodul selectat
+    # --------------------------------------
+    tid = st.session_state["nb_modal_for"]
+    if tid:
+        t = by_id.get(tid)
+        if t:
+            with st.modal(f"Table details: {tid}"):
+                cols = t.get("columns", []) or []
+                rows = [
+                    {
+                        "Column": c.get("name") or "?",
+                        "Type": c.get("type") or c.get("data_type") or "",
+                        "Nullable": "YES" if c.get("nullable", True) else "NO",
+                        "PK": "YES" if (c.get("pk") or c.get("primary_key")) else "NO",
+                    }
+                    for c in cols
+                ]
+                st.dataframe(rows, width="stretch", hide_index=True)
+                if st.button("Close", key="nb_close_btn"):
+                    st.session_state["nb_modal_for"] = None
+        else:
+            st.session_state["nb_modal_for"] = None
 
     by_id, _, neighbors, edges_all, edge_fk = _build_index(schema)
 
