@@ -1,8 +1,9 @@
+
 # =====================================================================
-#  core/graph_builder.py — full graph, full width, orange labels, dispersed layout
+#  core/graph_builder.py — full graph, full width, orange labels, dispersed
 # =====================================================================
 from __future__ import annotations
-import time
+import time, math
 from typing import Dict, List, Set, Callable, Optional, Tuple
 import streamlit as st
 
@@ -13,16 +14,19 @@ CYTO: Optional[Callable] = None
 CYTO_NAME: str = ""
 
 def _load_cyto() -> Tuple[Optional[Callable], str]:
+    # A) streamlit-cytoscapejs (API: st_cytoscapejs(elements, stylesheet, key=...))
     try:
         from streamlit_cytoscapejs import st_cytoscapejs  # type: ignore
         return st_cytoscapejs, "st_cytoscapejs"
     except Exception:
         pass
+    # B) anumite fork-uri: streamlit_cytoscapejs.cytoscape(...)
     try:
         from streamlit_cytoscapejs import cytoscape  # type: ignore
         return cytoscape, "cytoscape_in_streamlit_cytoscapejs"
     except Exception:
         pass
+    # C) pachet alternativ: st-cytoscape (API extins)
     try:
         from st_cytoscape import cytoscape  # type: ignore
         return cytoscape, "st_cytoscape.cytoscape"
@@ -53,25 +57,35 @@ def _canon(s: Optional[str]) -> Optional[str]:
     )
 
 def _build_index(schema: dict):
+    """
+    Return:
+      - by_id       : {table_name -> table_obj}
+      - canon_to_orig: {CANON -> original}
+      - neighbors   : {table -> set(neighbors)}
+      - edges       : list of Cytoscape edges (with labels)
+      - edge_fk     : {edge_id -> FK string}
+    """
     by_id: Dict[str, dict] = {}
     canon_to_orig: Dict[str, str] = {}
     neighbors: Dict[str, Set[str]] = {}
     edges: List[dict] = []
     edge_fk: Dict[str, str] = {}
 
+    # Index tables
     for t in (schema.get("tables") or []):
         tid = t.get("id") or t.get("name")
         if not tid:
             continue
         by_id[tid] = t
 
-    for tid in by_id.keys():
+    for tid in list(by_id.keys()):
         c = _canon(tid)
         if c:
             canon_to_orig[c] = tid
 
     neighbors = {tid: set() for tid in by_id.keys()}
 
+    # Build edges + neighbors
     for t in by_id.values():
         src = t.get("id") or t.get("name")
         for r in (t.get("relations") or []):
@@ -102,6 +116,33 @@ def _build_index(schema: dict):
 
     return by_id, canon_to_orig, neighbors, edges, edge_fk
 
+def _scatter_positions(ids: List[str], radius_step: int = 180) -> Dict[str, Dict[str, float]]:
+    """
+    Returnează o poziționare deterministă în cerc pentru fiecare id.
+    Scop: 'preset positions' pentru streamlit-cytoscapejs, ca nodurile
+    să fie dispersate de la început fără a trece 'layout' în apel.
+    """
+    n = max(1, len(ids))
+    # concentric dacă sunt multe noduri: creștem raza gradual
+    positions: Dict[str, Dict[str, float]] = {}
+    per_ring = max(8, min(24, int(2*math.sqrt(n))))
+    ring_index = 0
+    idx_on_ring = 0
+    angle_step = 2*math.pi / per_ring
+
+    for k, tid in enumerate(ids):
+        if idx_on_ring >= per_ring:
+            ring_index += 1
+            idx_on_ring = 0
+        angle = idx_on_ring * angle_step
+        radius = (ring_index + 1) * radius_step
+        x = radius * math.cos(angle)
+        y = radius * math.sin(angle)
+        positions[tid] = {"x": x, "y": y}
+        idx_on_ring += 1
+
+    return positions
+
 # =====================================================================
 # Styling
 # =====================================================================
@@ -112,7 +153,7 @@ def _stylesheet() -> List[dict]:
             "selector": "node",
             "style": {
                 "label": "data(label)",
-                "color": "#FFA500",                # ORANGE TEXT ✔
+                "color": "#FFA500",                # ORANGE text ✓
                 "background-color": "#1d4f91",
                 "font-size": 16,
                 "text-wrap": "wrap",
@@ -157,23 +198,17 @@ def _stylesheet() -> List[dict]:
 # =====================================================================
 
 def _call_cyto(elements, stylesheet, key, height="700px"):
-    layout = { "name": "cose" }   # dispersion layout ✔
-
+    """
+    - pentru 'st_cytoscapejs' : NU trimitem layout (API nu suportă). Ne bazăm pe poziții presetate.
+    - pentru 'st_cytoscape.cytoscape' : trimitem layout 'cose' ca să împrăștie nodurile.
+    """
     if CYTO_NAME in ["st_cytoscapejs", "cytoscape_in_streamlit_cytoscapejs"]:
-        return CYTO(
-            elements=elements,
-            stylesheet=stylesheet,
-            key=key,
-            layout=layout
-        )
+        # API: st_cytoscapejs(elements, stylesheet, key=...)
+        return CYTO(elements=elements, stylesheet=stylesheet, key=key)  # type: ignore
     elif CYTO_NAME == "st_cytoscape.cytoscape":
-        return CYTO(
-            elements, stylesheet,
-            width="100%",
-            height=height,
-            layout=layout,
-            key=key
-        )
+        # API extins: cytoscape(elements, stylesheet, width, height, layout, key)
+        return CYTO(elements, stylesheet, width="100%", height=height,
+                    layout={"name": "cose"}, key=key)  # type: ignore
     else:
         raise RuntimeError("No Cytoscape renderer available.")
 
@@ -188,17 +223,26 @@ def render_table_neighborhood(schema: dict, selected_table: str, height: int = 7
 
     by_id, _, _, edges, edge_fk = _build_index(schema)
 
-    nodes = []
-    for tid in by_id.keys():
+    # --- nodes ---
+    node_ids = list(by_id.keys())
+    nodes: List[dict] = []
+    preset_pos = _scatter_positions(node_ids)
+
+    for tid in node_ids:
         cls = "selectedTable" if selected_table and tid == selected_table else ""
-        nodes.append({
+        node = {
             "data": {"id": tid, "label": tid},
             "classes": cls
-        })
+        }
+        # Pentru st_cytoscapejs NU putem trimite layout -> folosim poziții presetate
+        if CYTO_NAME in ["st_cytoscapejs", "cytoscape_in_streamlit_cytoscapejs"]:
+            node["position"] = preset_pos[tid]               # <- preset positions ✓
+            node["grabbable"] = True
+            node["locked"] = False
+        nodes.append(node)
 
     # ***** CONTAINER FULL-WIDTH & ALINIAT CORECT *****
-    container = st.container()
-    with container:
+    with st.container():
         result = _call_cyto(
             elements=nodes + edges,
             stylesheet=_stylesheet(),
@@ -218,7 +262,7 @@ def render_table_neighborhood(schema: dict, selected_table: str, height: int = 7
             if fk:
                 st.info(f"Foreign Key: {fk}")
 
-        # Double click node
+        # Double click node (simulate): two selections within 0.6s
         st.session_state.setdefault("nb_last_nodes", [])
         st.session_state.setdefault("nb_ts", 0.0)
         st.session_state.setdefault("nb_modal_for", None)
@@ -245,6 +289,5 @@ def render_table_neighborhood(schema: dict, selected_table: str, height: int = 7
                     for c in (t.get("columns") or [])
                 ]
                 st.dataframe(rows, use_container_width=True, hide_index=True)
-
                 if st.button("Close"):
                     st.session_state["nb_modal_for"] = None
