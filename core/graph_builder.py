@@ -284,10 +284,46 @@ def render_graph(schema: dict) -> None:
             st.session_state["graph_modal_for"] = None
 
 
-def render_table_neighborhood(schema: dict, selected_table: str, height: int = 520) -> None:
+
+def render_table_neighborhood(schema: dict, selected_table: str, depth: int = 2, height: int = 680) -> None:
+    """
+    Vizualizare centrată pe tabela selectată, cu BFS până la 'depth':
+      - include nodul central și TOATE nodurile ajunse prin relații până la adâncimea cerută,
+      - colorează pe niveluri (level0/1/2/Other),
+      - click pe edge => FK info, select dublu rapid pe nod => modal cu coloane.
+
+    NOTĂ: 'streamlit-cytoscapejs' nu acceptă layout/width/height ca argumente; componenta se întinde
+    pe lățimea containerului Streamlit (pagina ta e în layout 'wide'), iar înălțimea depinde de CSS-ul intern.
+    """
     if _IMPORT_ERROR is not None:
         st.error(str(_IMPORT_ERROR))
         return
+
+    by_id, _, neighbors, edges_all, edge_fk = _build_index(schema)
+
+    # 1) BFS de la selected_table până la 'depth'
+    def bfs_nodes(start: str, max_depth: int) -> Dict[str, int]:
+        levels: Dict[str, int] = {}
+        if start not in neighbors:
+            return levels
+        levels[start] = 0
+        frontier = {start}
+        visited = {start}
+        for d in range(1, max_depth + 1):
+            nxt = set()
+            for u in frontier:
+                for v in neighbors.get(u, set()):
+                    if v not in visited:
+                        visited.add(v)
+                        levels[v] = d
+                        nxt.add(v)
+            frontier = nxt
+            if not frontier:
+                break
+        return levels
+
+    levels = bfs_nodes(selected_table, depth)
+
 
     by_id, _, neighbors, edges_all, edge_fk = _build_index(schema)
 
