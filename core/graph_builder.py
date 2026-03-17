@@ -184,15 +184,24 @@ def _stylesheet() -> List[dict]:
 #   st_cytoscapejs(...) returnează un dict cu "nodes" și "edges" SELECTATE
 #   (nu "tap"/"dbltap"). Simulăm "dbl-click" comparând selecția curentă cu ultima.
 # -----------------------------------------------------------------------------
+
 def _call_cyto(elements: List[dict], stylesheet: List[dict], width: str, height: str, layout: dict, key: str):
-    if CYTO_NAME in ("st_cytoscapejs", "cytoscape_in_streamlit_cytoscapejs"):
-        # API-ul principal acceptă elements, stylesheet, apoi opționale
-        return CYTO(elements, stylesheet, width=width, height=height, layout=layout, key=key)  # type: ignore
+    if CYTO_NAME == "st_cytoscapejs":
+        # API-ul streamlit-cytoscapejs 0.0.2 acceptă doar (elements, stylesheet [, key])
+        # Nu suportă width/height/layout ca arguments. Lăsăm Streamlit să gestioneze containerul.
+        return CYTO(elements, stylesheet, key=key)  # type: ignore
+
+    elif CYTO_NAME == "cytoscape_in_streamlit_cytoscapejs":
+        # Unele fork-uri pot expune 'cytoscape' cu aceeași limitare; apelăm la fel ca mai sus
+        return CYTO(elements, stylesheet, key=key)  # type: ignore
+
     elif CYTO_NAME == "st_cytoscape.cytoscape":
-        # pachetul alternativ are aceleași argumente, dar acceptă de obicei și keywords
+        # Pachetul alternativ st-cytoscape acceptă argumente extinse
         return CYTO(elements, stylesheet, width=width, height=height, layout=layout, key=key)  # type: ignore
+
     else:
         raise RuntimeError("No Cytoscape renderer available.")
+
 
 
 # -------------------- Public API --------------------
