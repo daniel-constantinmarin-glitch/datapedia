@@ -35,15 +35,15 @@ def _load_cyto() -> Tuple[Optional[Callable], str]:
     return None, ""
 
 CYTO, CYTO_NAME = _load_cyto()
+
 _IMPORT_ERROR = None if CYTO else ImportError(
-    "Cannot locate a Cytoscape renderer. Install one of:
-"
-    "  pip install --upgrade streamlit-cytoscapejs
-"
-    "  or
-"
-    "  pip install st-cytoscape"
+    """Cannot locate a Cytoscape renderer. Install one of:
+    pip install --upgrade streamlit-cytoscapejs
+    or
+    pip install st-cytoscape
+    """
 )
+
 
 # =====================================================================
 # Helpers
