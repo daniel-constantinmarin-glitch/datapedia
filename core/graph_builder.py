@@ -260,4 +260,4 @@ def render_table_neighborhood(schema: dict, selected_table: str, height: int = 7
 
                 if st.button("Close"):
                     st.session_state["nb_modal_for"] = None
-``
+
