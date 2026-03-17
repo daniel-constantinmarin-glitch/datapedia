@@ -58,6 +58,7 @@ with tab1:
                 st.error(f"Error saving project: {e}")
 
 
+
 # ------------------------------------------------------
 # 2. PROJECT BROWSER TAB
 # ------------------------------------------------------
@@ -98,40 +99,44 @@ with tab2:
                 table = next((t for t in tables_raw if _tbl_name(t) == selected_table), None)
 
                 if table:
-                    # Layout: stânga = detalii/coloane, dreapta = graf vecini
-                    left, right = st.columns([1, 2], gap="large")
+                    # --- Detalii/coloane (sus) ---
+                    st.subheader(f"Columns & Types — {selected_table}")
 
-                    with left:
-                        st.subheader(f"Columns & Types — {selected_table}")
+                    import pandas as pd
+                    rows = []
+                    for c in table.get("columns", []):
+                        rows.append({
+                            "column":   c.get("name", "?"),
+                            "type":     c.get("type") or c.get("data_type") or "",
+                            "nullable": c.get("nullable"),
+                            "pk":       c.get("pk") or c.get("primary_key"),
+                            "unique":   c.get("unique"),
+                            "default":  c.get("default"),
+                        })
+                    df = pd.DataFrame(rows, columns=["column", "type", "nullable", "pk", "unique", "default"])
 
-                        # Tabel structurat cu informații despre coloane
-                        import pandas as pd
+                    # ✅ fără FutureWarning: convertim explicit la bool
+                    if not df.empty:
+                        df["pk"] = df["pk"].astype("boolean").fillna(False)
+                        df["nullable"] = df["nullable"].astype("boolean").fillna(False)
+                        pk_cols = int(df["pk"].sum())
+                        nullable_cols = int(df["nullable"].sum())
+                    else:
+                        pk_cols = 0
+                        nullable_cols = 0
 
-                        rows = []
-                        for c in table.get("columns", []):
-                            rows.append({
-                                "column":  c.get("name", "?"),
-                                "type":    c.get("type") or c.get("data_type") or "",
-                                "nullable": c.get("nullable"),
-                                "pk":      c.get("pk") or c.get("primary_key"),
-                                "unique":  c.get("unique"),
-                                "default": c.get("default")
-                            })
-                        df = pd.DataFrame(rows, columns=["column", "type", "nullable", "pk", "unique", "default"])
-                        st.dataframe(df, use_container_width=True, hide_index=True)
+                    # ✅ Streamlit: width='stretch' (înlocuiește use_container_width)
+                    st.dataframe(df, width="stretch", hide_index=True)
+                    st.caption(f"Columns: **{len(df)}** · PK: **{pk_cols}** · Nullable: **{nullable_cols}**")
 
-                        # Mic sumar
-                        total_cols = len(df)
-                        pk_cols = int(df["pk"].fillna(False).sum()) if not df.empty else 0
-                        nullable_cols = int(df["nullable"].fillna(False).sum()) if not df.empty else 0
-                        st.caption(f"Columns: **{total_cols}** · PK: **{pk_cols}** · Nullable: **{nullable_cols}**")
+                    # --- Control nivel BFS pentru graful de vecini ---
+                    depth = st.slider("Neighborhood depth", 1, 5, 2, key="nb_depth")
 
-                    with right:
-                        st.subheader("Table Neighborhood (FK links)")
-                        # Graful interactiv al vecinilor tabelei selectate
-                        from core.graph_builder import render_table_neighborhood
-                        render_table_neighborhood(schema, selected_table, height=520)
-
+                    # --- Graful (jos), pe toată lățimea paginii ---
+                    st.subheader("Table Neighborhood (FK links)")
+                    from core.graph_builder import render_table_neighborhood
+                    # trimitem și depth; height mai înalt pentru full‑width vizibil
+                    render_table_neighborhood(schema, selected_table, depth=depth, height=680)
                 else:
                     st.warning("Selected table not found in schema.")
 
