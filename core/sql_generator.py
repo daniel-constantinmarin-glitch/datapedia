@@ -92,7 +92,10 @@ def generate_sql(prompt: str, schema: dict) -> str:
 
         return text
 
-    def optimize_sql(query: str, schema: dict) -> str:
+    except Exception as e:
+        return f"-- ERROR calling Vertex AI: {e}\nRAW RESPONSE: {r.text if 'r' in locals() else ''}"
+
+def optimize_sql(query: str, schema: dict) -> str:
     # 1. Token using VM service account
     try:
         creds, _ = google.auth.default()
@@ -157,8 +160,3 @@ def generate_sql(prompt: str, schema: dict) -> str:
 
     except Exception as e:
         return f"-- ERROR calling Vertex AI: {e}"
-
-    
-
-    except Exception as e:
-        return f"-- ERROR calling Vertex AI: {e}\nRAW RESPONSE: {r.text if 'r' in locals() else ''}"
