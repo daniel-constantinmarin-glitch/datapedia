@@ -1,4 +1,5 @@
 
+
 import streamlit as st
 import os
 
@@ -40,17 +41,22 @@ with tab1:
         elif upload.size > 5 * 1024 * 1024:
             st.error("File is too large. Max size is 5MB.")
         else:
-            base = "/home/daniel_constantin_marin_ing_com"
+            base = "/home/daniel_constantin_marin_ing_com"  # keep your base path
             folder = os.path.join(base, name)
+
             try:
                 os.makedirs(folder, exist_ok=True)
                 path = os.path.join(folder, upload.name)
+
                 with open(path, "wb") as f:
                     f.write(upload.getbuffer())
+
                 save_project(name, path)
                 st.success("Project created successfully!")
+
             except Exception as e:
                 st.error(f"Error saving project: {e}")
+
 
 # ------------------------------------------------------
 # 2. PROJECT BROWSER TAB
@@ -73,6 +79,7 @@ with tab2:
             proj = load_project(selected_proj)
             schema = load_schema(proj.get("schema", "")) if proj.get("schema") else {"tables": []}
 
+            # list of tables (id/name)
             tables_raw = schema.get("tables", [])
 
             def _tbl_name(t):
@@ -87,9 +94,11 @@ with tab2:
             )
 
             if selected_table:
+                # find table object
                 table = next((t for t in tables_raw if _tbl_name(t) == selected_table), None)
 
                 if table:
+                    # --- Columns & Types (full-width) ---
                     st.subheader(f"Columns & Types — {selected_table}")
 
                     import pandas as pd
@@ -114,13 +123,15 @@ with tab2:
                         pk_cols = 0
                         nullable_cols = 0
 
-                    st.dataframe(df, width='stretch', hide_index=True)
+                    st.dataframe(df, use_container_width=True, hide_index=True)
                     st.caption(f"Columns: **{len(df)}** · PK: **{pk_cols}** · Nullable: **{nullable_cols}**")
 
+                    # --- Full graph (no depth) ---
                     st.subheader("Table Neighborhood (FK links)")
-                    render_table_neighborhood(schema, selected_table, height=1000)
+                    render_table_neighborhood(schema, selected_table, height=760)
                 else:
                     st.warning("Selected table not found in schema.")
+
 
 # ------------------------------------------------------
 # 3. SQL GENERATOR TAB
@@ -154,8 +165,10 @@ with tab3:
         if gen_btn and selected_proj_sql:
             proj = load_project(selected_proj_sql)
             schema = load_schema(proj.get("schema", "")) if proj.get("schema") else {"tables": []}
+
             result_sql = generate_sql(prompt, schema)
             st.code(result_sql, language="sql")
+
 
 # ------------------------------------------------------
 # 4. GRAPH TAB
@@ -178,7 +191,8 @@ with tab4:
             proj = load_project(selected_proj_graph)
             schema = load_schema(proj.get("schema", "")) if proj.get("schema") else {"tables": []}
 
+            # optional: choose a table to highlight
             tables = sorted({(t.get("id") or t.get("name")) for t in schema.get("tables", []) if (t.get("id") or t.get("name"))})
             highlight = st.selectbox("Highlight table (optional)", [""] + tables, key="graph_highlight")
 
-            render_table_neighborhood(schema, highlight, height=1000)
+            render_table_neighborhood(schema, highlight, height=760)
