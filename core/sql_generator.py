@@ -160,3 +160,44 @@ def optimize_sql(query: str, schema: dict) -> str:
 
     except Exception as e:
         return f"-- ERROR calling Vertex AI: {e}"
+
+import re
+
+def extract_fields_from_query(query: str, schema: dict) -> dict:
+    """
+    Parse SQL and extract tables and columns actually used.
+    Returns:
+       {
+          "tables": [...],
+          "columns": { "table": [col1, col2, ...], ... }
+       }
+    """
+    tables_in_schema = {
+        (t.get("id") or t.get("name")): [c.get("name") for c in t.get("columns", [])]
+        for t in schema.get("tables", [])
+    }
+
+    detected_tables = set()
+    detected_columns = {}
+
+    # Detect tables used in FROM / JOIN
+    table_regex = r"(?:FROM|JOIN)\s+([a-zA-Z0-9_\.]+)"
+    for tbl in re.findall(table_regex, query, flags=re.IGNORECASE):
+        base = tbl.split(".")[-1]
+        if base in tables_in_schema:
+            detected_tables.add(base)
+
+    # Extract all tokens that could be columns
+    col_regex = r"[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+"
+    for token in re.findall(col_regex, query):
+        tbl, col = token.split(".")
+        if tbl in tables_in_schema and col in tables_in_schema[tbl]:
+            if tbl not in detected_columns:
+                detected_columns[tbl] = []
+            detected_columns[tbl].append(col)
+
+    return {
+        "tables": sorted(list(detected_tables)),
+        "columns": detected_columns
+    }
+
