@@ -170,24 +170,24 @@ with tab3:
             result_sql = generate_sql(prompt, schema)
             st.code(result_sql, language="sql")
 
-        if result_sql and result_sql.strip():
-            show_fields_btn = st.button("Show fields used in query", key="sql_fields_btn")
-        
-            if show_fields_btn:
-                proj = load_project(selected_proj_sql)
-                schema = load_schema(proj.get("schema", "")) if proj.get("schema") else {"tables": []}
-        
-                fields = extract_fields_from_query(result_sql, schema)
-        
-                st.subheader("Tables used:")
-                st.write(", ".join(fields["tables"]) if fields["tables"] else "None detected.")
-        
-                st.subheader("Columns used:")
-                if fields["columns"]:
-                    for tbl, cols in fields["columns"].items():
-                        st.markdown(f"**{tbl}**: {', '.join(cols)}")
-                else:
-                    st.write("No columns detected.")
+            if result_sql and result_sql.strip():
+                show_fields_btn = st.button("Show fields used in query", key="sql_fields_btn")
+            
+                if show_fields_btn:
+                    proj = load_project(selected_proj_sql)
+                    schema = load_schema(proj.get("schema", "")) if proj.get("schema") else {"tables": []}
+            
+                    fields = extract_fields_from_query(result_sql, schema)
+            
+                    st.subheader("Tables used:")
+                    st.write(", ".join(fields["tables"]) if fields["tables"] else "None detected.")
+            
+                    st.subheader("Columns used:")
+                    if fields["columns"]:
+                        for tbl, cols in fields["columns"].items():
+                            st.markdown(f"**{tbl}**: {', '.join(cols)}")
+                    else:
+                        st.write("No columns detected.")
 
     st.subheader("Optimize Existing SQL")
     sql_input = st.text_area(
@@ -205,24 +205,24 @@ with tab3:
         optimized = optimize_sql(sql_input, schema)
         st.code(optimized, language="sql")
 
-    if optimized and optimized.strip():
-        show_opt_fields_btn = st.button("Show fields used in optimized query", key="sql_opt_fields_btn")
-    
-        if show_opt_fields_btn:
-            proj = load_project(selected_proj_sql)
-            schema = load_schema(proj.get("schema", "")) if proj.get("schema") else {"tables": []}
-    
-            fields = extract_fields_from_query(optimized, schema)
-    
-            st.subheader("Tables used:")
-            st.write(", ".join(fields["tables"]) if fields["tables"] else "None detected.")
-    
-            st.subheader("Columns used:")
-            if fields["columns"]:
-                for tbl, cols in fields["columns"].items():
-                    st.markdown(f"**{tbl}**: {', '.join(cols)}")
-            else:
-                st.write("No columns detected.")
+        if optimized and optimized.strip():
+            show_opt_fields_btn = st.button("Show fields used in optimized query", key="sql_opt_fields_btn")
+        
+            if show_opt_fields_btn:
+                proj = load_project(selected_proj_sql)
+                schema = load_schema(proj.get("schema", "")) if proj.get("schema") else {"tables": []}
+        
+                fields = extract_fields_from_query(optimized, schema)
+        
+                st.subheader("Tables used:")
+                st.write(", ".join(fields["tables"]) if fields["tables"] else "None detected.")
+        
+                st.subheader("Columns used:")
+                if fields["columns"]:
+                    for tbl, cols in fields["columns"].items():
+                        st.markdown(f"**{tbl}**: {', '.join(cols)}")
+                else:
+                    st.write("No columns detected.")
     
             
 
