@@ -5,7 +5,7 @@ import os
 
 from core.graph_builder import render_table_neighborhood
 from core.schema_loader import load_schema
-from core.sql_generator import generate_sql
+from core.sql_generator import generate_sql, optimize_sql
 from core.project_store import list_projects, load_project, save_project
 
 st.set_page_config(page_title='Datapedia', layout='wide')
@@ -168,6 +168,24 @@ with tab3:
 
             result_sql = generate_sql(prompt, schema)
             st.code(result_sql, language="sql")
+
+    st.subheader("Optimize Existing SQL")
+    sql_input = st.text_area(
+        "Paste an existing SQL query to optimize",
+        key="sql_opt_input",
+        height=200
+    )
+    
+    opt_btn = st.button("Optimize SQL", key="sql_opt_btn")
+    
+    if opt_btn and selected_proj_sql:
+        proj = load_project(selected_proj_sql)
+        schema = load_schema(proj.get("schema", "")) if proj.get("schema") else {"tables": []}
+    
+        optimized = optimize_sql(sql_input, schema)
+        st.code(optimized, language="sql")
+
+
 
 
 # ------------------------------------------------------
