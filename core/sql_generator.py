@@ -92,5 +92,73 @@ def generate_sql(prompt: str, schema: dict) -> str:
 
         return text
 
+    def optimize_sql(query: str, schema: dict) -> str:
+    # 1. Token using VM service account
+    try:
+        creds, _ = google.auth.default()
+        creds.refresh(Request())
+        token = creds.token
+    except Exception as e:
+        return f"-- ERROR while obtaining access token: {e}"
+
+    project_id = os.getenv("VERTEX_PROJECT_ID", "datapedia-489407")
+    location = os.getenv("VERTEX_LOCATION", "us-central1")
+    model = os.getenv("VERTEX_MODEL", "gemini-2.5-pro")
+
+    url = (
+        f"https://{location}-aiplatform.googleapis.com/v1/"
+        f"projects/{project_id}/locations/{location}/"
+        f"publishers/google/models/{model}:generateContent"
+    )
+
+    schema_str = build_schema_summary(schema)
+
+    system_rules = (
+        "You are an expert SQL optimizer.\n"
+        "Optimize the SQL query WITHOUT changing the output.\n"
+        "Rules:\n"
+        "1. Do NOT change the meaning or returned rows.\n"
+        "2. Use only tables/columns present in schema.\n"
+        "3. Simplify joins, remove redundancies, push filters down, rewrite subqueries\n"
+        "4. Output ONLY SQL.\n"
+        "5. If optimization is impossible, return the original SQL.\n"
+    )
+
+    final_prompt = (
+        f"{system_rules}\n\n"
+        f"SCHEMA:\n{schema_str}\n\n"
+        f"SQL TO OPTIMIZE:\n{query}\n"
+    )
+
+    body = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [{"text": final_prompt}]
+            }
+        ]
+    }
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+
+    try:
+        r = requests.post(url, headers=headers, data=json.dumps(body), timeout=60)
+        r.raise_for_status()
+        response = r.json()
+        text = response["candidates"][0]["content"]["parts"][0].get("text", "").strip()
+
+        if not text:
+            return query  # fallback
+
+        return text
+
+    except Exception as e:
+        return f"-- ERROR calling Vertex AI: {e}"
+
+    
+
     except Exception as e:
         return f"-- ERROR calling Vertex AI: {e}\nRAW RESPONSE: {r.text if 'r' in locals() else ''}"
