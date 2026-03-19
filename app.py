@@ -17,7 +17,15 @@ if "last_optimized_sql" not in st.session_state:
     st.session_state["last_optimized_sql"] = ""
 
 # Tabs
-tab1, tab2, tab3, tab4 = st.tabs(["Onboarding", "Project Browser", "SQL Generator", "Graph View"])
+
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "Onboarding",
+    "Project Browser",
+    "SQL Generator",
+    "Graph View",
+    "Procedure Analyzer"   
+])
+
 
 # ------------------------------------------------------
 # 1. ONBOARDING TAB
@@ -261,3 +269,52 @@ with tab4:
             tables = sorted({(t.get("id") or t.get("name")) for t in schema.get("tables", []) if (t.get("id") or t.get("name"))})
             highlight = st.selectbox("Highlight table (optional)", [""] + tables, key="graph_highlight")
             render_table_neighborhood(schema, highlight, height=760)
+
+# ------------------------------------------------------
+# 5. PROCEDURE ANALYZER TAB
+# ------------------------------------------------------
+with tab5:
+    st.header("SQL Procedure Analyzer")
+
+    projs = list_projects()
+    if not projs:
+        st.info("No projects found. Please create one in the Onboarding tab.")
+    else:
+        selected_proj_proc = st.selectbox(
+            "Select project",
+            [p.get("name", "") for p in projs],
+            key="proc_proj"
+        )
+
+        st.write("Upload a SQL stored procedure or paste its content below.")
+
+        uploaded_proc = st.file_uploader(
+            "Upload .sql file",
+            type=["sql"],
+            key="proc_upload"
+        )
+
+        proc_text = st.text_area(
+            "Or paste SQL procedure here",
+            height=300,
+            key="proc_text"
+        )
+
+        analyze_btn = st.button("Analyze Procedure", key="analyze_proc_btn")
+
+        if analyze_btn and selected_proj_proc:
+            proj = load_project(selected_proj_proc)
+            schema = load_schema(proj.get("schema", "")) if proj.get("schema") else {"tables": []}
+
+            if uploaded_proc:
+                proc_code = uploaded_proc.read().decode("utf-8")
+            else:
+                proc_code = proc_text
+
+            if not proc_code.strip():
+                st.error("Please upload or paste a SQL procedure first.")
+            else:
+                from core.sql_generator import explain_procedure
+                analysis = explain_procedure(proc_code, schema)
+                st.subheader("AI Explanation")
+                st.write(analysis)
