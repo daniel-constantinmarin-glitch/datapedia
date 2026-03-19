@@ -183,10 +183,31 @@ with tab3:
                             })
 
                 df = pd.DataFrame(rows, columns=["table", "column", "type", "nullable", "pk", "unique", "default"])
+                
+                # Dacă extractorul nu a găsit coloane dar a găsit tabele,
+                # afișăm TOATE coloanele tabelelor detectate, din schema proiectului actual.
                 if df.empty:
-                    st.info("No fields detected.")
+                    if fields.get("tables"):
+                        rows = []
+                        for tbl in fields["tables"]:
+                            tdef = tables_map.get(tbl, {})
+                            for c in tdef.get("columns", []):
+                                rows.append({
+                                    "table": tbl,
+                                    "column": c.get("name", "?"),
+                                    "type": c.get("type") or c.get("data_type") or "",
+                                    "nullable": bool(c.get("nullable")),
+                                    "pk": bool(c.get("pk") or c.get("primary_key")),
+                                    "unique": bool(c.get("unique")),
+                                    "default": c.get("default") or ""
+                                })
+                        df = pd.DataFrame(rows, columns=["table","column","type","nullable","pk","unique","default"])
+                        st.dataframe(df, width="stretch", hide_index=True)
+                    else:
+                        st.info("No fields detected.")
                 else:
                     st.dataframe(df, width="stretch", hide_index=True)
+
 
         # ---- Optimizer
         st.subheader("Optimize Existing SQL")
@@ -246,8 +267,27 @@ with tab3:
                             })
 
                 df = pd.DataFrame(rows, columns=["table", "column", "type", "nullable", "pk", "unique", "default"])
+                # Dacă extractorul nu a găsit coloane dar a găsit tabele,
+                # afișăm TOATE coloanele tabelelor detectate, din schema proiectului actual.
                 if df.empty:
-                    st.info("No fields detected.")
+                    if fields.get("tables"):
+                        rows = []
+                        for tbl in fields["tables"]:
+                            tdef = tables_map.get(tbl, {})
+                            for c in tdef.get("columns", []):
+                                rows.append({
+                                    "table": tbl,
+                                    "column": c.get("name", "?"),
+                                    "type": c.get("type") or c.get("data_type") or "",
+                                    "nullable": bool(c.get("nullable")),
+                                    "pk": bool(c.get("pk") or c.get("primary_key")),
+                                    "unique": bool(c.get("unique")),
+                                    "default": c.get("default") or ""
+                                })
+                        df = pd.DataFrame(rows, columns=["table","column","type","nullable","pk","unique","default"])
+                        st.dataframe(df, width="stretch", hide_index=True)
+                    else:
+                        st.info("No fields detected.")
                 else:
                     st.dataframe(df, width="stretch", hide_index=True)
 
