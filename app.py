@@ -112,7 +112,7 @@ with tab2:
                         nullable_cols = 0
 
                     # IMPORTANT: width=None (fără warning)
-                     st.dataframe(df, width="stretch", hide_index=True)
+                    st.dataframe(df, width="stretch", hide_index=True)
                     st.caption(f"Columns: **{len(df)}** · PK: **{pk_cols}** · Nullable: **{nullable_cols}**")
 
                     # --- Full graph (no depth) ---
@@ -187,7 +187,7 @@ with tab3:
                 if df.empty:
                     st.info("No fields detected.")
                 else:
-                     st.dataframe(df, width="stretch", hide_index=True)
+                    st.dataframe(df, width="stretch", hide_index=True)
 
         # -------- Optimizer --------
         st.subheader("Optimize Existing SQL")
@@ -236,7 +236,7 @@ with tab3:
                 if df.empty:
                     st.info("No fields detected.")
                 else:
-                     st.dataframe(df, width="stretch", hide_index=True)
+                    st.dataframe(df, width="stretch", hide_index=True)
 
 # ------------------------------------------------------
 # 4. GRAPH TAB
