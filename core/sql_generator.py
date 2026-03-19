@@ -178,18 +178,23 @@ def optimize_sql(query: str, schema: dict) -> str:
 # -----------------------------
 def extract_fields_from_query(query: str, schema: dict) -> dict:
     """
-    Extract tables and columns used by the query.
-    Supports: aliases (t.col, t.*), SELECT * (global & per-table), quoted/qualified identifiers,
-              and unqualified columns mapped uniquely across detected tables.
-    Returns:
-        {
-            "tables": [table1, table2, ...],
-            "columns": { "table1": [colA, colB], ... }
-        }
+    Robust SQL table & column extractor.
+    Handles:
+      - FROM / JOIN on multiple lines
+      - CTEs (WITH ... AS)
+      - Subqueries
+      - Aliases (with and without AS)
+      - SELECT *
+      - t.*
+      - schema.table and db.schema.table
     """
-    # Build schema maps
+
+    # -----------------------------------------------------
+    # Build schema map
+    # -----------------------------------------------------
     tables_in_schema = {}
-    col_index = {}  # col_name -> set(tables that have it)
+    col_index = {}
+
     for t in schema.get("tables", []):
         tname = (t.get("id") or t.get("name"))
         if not tname:
@@ -199,72 +204,97 @@ def extract_fields_from_query(query: str, schema: dict) -> dict:
         for c in cols:
             col_index.setdefault(c, set()).add(tname)
 
-    # Normalize whitespace to ease regex
-    q = " ".join(query.replace("\n", " ").split())
+    # Normalize query
+    q = query.replace("\n", " ").replace("\t", " ")
+    q = " ".join(q.split())
 
-    # Detect FROM/JOIN tables + aliases
-    alias_map = {}        # alias -> base_table
-    detected_tables = []  # keep order of appearance
-    tbl_pat = r"(?:FROM|JOIN)\s+((?:`[^`]+`|\"[^\"]+\"|\[[^\]]+\]|[a-zA-Z0-9_\.])+)(?:\s+(?:AS\s+)?([a-zA-Z0-9_`\"\[\]]+))?"
-    for base_tbl_raw, alias_raw in re.findall(tbl_pat, q, flags=re.IGNORECASE):
-        base = _clean_ident(base_tbl_raw)
-        alias = _clean_ident(alias_raw) if alias_raw else None
-        if base in tables_in_schema and base not in detected_tables:
-            detected_tables.append(base)
-        if alias and alias.lower() != base.lower():
-            alias_map[_clean_ident(alias)] = base
+    # -----------------------------------------------------
+    # Detect tables (FROM + JOIN + WITH CTE)
+    # -----------------------------------------------------
+    detected_tables = []
+    alias_map = {}
 
-    # SELECT list (to detect global star or t.* quickly)
-    sel_match = re.search(r"select\s+(.*?)\s+from\s", q, flags=re.IGNORECASE | re.S)
-    select_clause = sel_match.group(1) if sel_match else ""
+    # All patterns that may contain tables:
+    table_patterns = [
+        r"(?:FROM|JOIN)\s+([a-zA-Z0-9_\.\`\"\[\]]+)(?:\s+(?:AS\s+)?([a-zA-Z0-9_]+))?",
+        r"WITH\s+([a-zA-Z0-9_]+)\s+AS\s*\(",
+        r"FROM\s+\(\s*SELECT.*?FROM\s+([a-zA-Z0-9_\.\`\"\[\]]+)"
+    ]
 
-    has_global_star = bool(re.search(r"(^|\s)\*(\s|$|,)", select_clause))
-    star_owners = set()  # tables that have t.* explicitly
-    for owner in re.findall(r"([a-zA-Z0-9_`\"\[\]]+)\s*\.\s*\*", select_clause):
-        owner_clean = _clean_ident(owner)
-        owner_table = alias_map.get(owner_clean, owner_clean)
-        if owner_table in tables_in_schema:
-            star_owners.add(owner_table)
+    import re
 
-    # Qualified columns t.col
+    for pat in table_patterns:
+        for base_raw, alias_raw in re.findall(pat, q, flags=re.IGNORECASE):
+            base = base_raw.strip("`[]\"").split(".")[-1]
+            alias = alias_raw.strip("`[]\"") if alias_raw else None
+
+            if base in tables_in_schema:
+                if base not in detected_tables:
+                    detected_tables.append(base)
+            if alias and alias.lower() != base.lower():
+                alias_map[alias] = base
+
+    # -----------------------------------------------------
+    # Detect SELECT clause
+    # -----------------------------------------------------
+    select_m = re.search(r"select\s+(.*?)\s+from\s", q, flags=re.IGNORECASE)
+    select_clause = select_m.group(1) if select_m else ""
+
+    has_global_star = "*" in select_clause
+
+    star_owners = set()
+    for owner in re.findall(r"([a-zA-Z0-9_]+)\s*\.\s*\*", select_clause):
+        owner = owner.strip()
+        tbl = alias_map.get(owner, owner)
+        if tbl in tables_in_schema:
+            star_owners.add(tbl)
+
+    # -----------------------------------------------------
+    # Detect qualified t.col
+    # -----------------------------------------------------
     detected_columns = {}
-    for tbl_or_alias, col in re.findall(r"([a-zA-Z0-9_`\"\[\]]+)\s*\.\s*([a-zA-Z0-9_`\"\[\]]+)", q):
-        col_clean = _clean_ident(col)
-        if col_clean == "*":
+    for tbl_or_alias, col in re.findall(r"([a-zA-Z0-9_]+)\s*\.\s*([a-zA-Z0-9_]+)", q):
+        if col == "*":
             continue
-        tbl_clean = _clean_ident(tbl_or_alias)
-        actual_tbl = alias_map.get(tbl_clean, tbl_clean)
-        if actual_tbl in tables_in_schema and col_clean in tables_in_schema[actual_tbl]:
-            detected_columns.setdefault(actual_tbl, []).append(col_clean)
+        tbl = alias_map.get(tbl_or_alias, tbl_or_alias)
+        if tbl in tables_in_schema and col in tables_in_schema[tbl]:
+            detected_columns.setdefault(tbl, []).append(col)
 
-    # Unqualified columns: atribuie dacă numele este unic printre tabelele detectate
-    # (sau, dacă avem o singură masă, le atribuim ei).
-    unq_tokens = set(re.findall(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\b", select_clause))
-    unq_tokens = {t for t in unq_tokens if t.lower() not in _SQL_KW}
+    # -----------------------------------------------------
+    # Unqualified columns (unique by schema)
+    # -----------------------------------------------------
+    tokens = set(re.findall(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\b", select_clause))
+    tokens = {t for t in tokens if t.lower() not in 
+              {'select','from','where','join','on','as','and','or','case','when','then','else',
+               'end','distinct','limit','group','order','by','left','right','inner','outer','asc','desc'}}
+
     if len(detected_tables) == 1:
-        only_tbl = detected_tables[0]
-        for tok in unq_tokens:
-            if tok in tables_in_schema[only_tbl]:
-                detected_columns.setdefault(only_tbl, []).append(tok)
-    elif len(detected_tables) > 1:
-        for tok in unq_tokens:
-            owners = [t for t in detected_tables if tok in tables_in_schema.get(t, [])]
+        tbl = detected_tables[0]
+        for t in tokens:
+            if t in tables_in_schema[tbl]:
+                detected_columns.setdefault(tbl, []).append(t)
+    else:
+        for t in tokens:
+            owners = [tbl for tbl in detected_tables if t in tables_in_schema.get(tbl, [])]
             if len(owners) == 1:
-                detected_columns.setdefault(owners[0], []).append(tok)
+                detected_columns.setdefault(owners[0], []).append(t)
 
-    # Expand stars
+    # -----------------------------------------------------
+    # Expand SELECT *
+    # -----------------------------------------------------
     if has_global_star:
-        for t in detected_tables:
-            for c in tables_in_schema[t]:
-                detected_columns.setdefault(t, []).append(c)
-    if star_owners:
-        for t in star_owners:
-            for c in tables_in_schema[t]:
-                detected_columns.setdefault(t, []).append(c)
+        for tbl in detected_tables:
+            for c in tables_in_schema[tbl]:
+                detected_columns.setdefault(tbl, []).append(c)
 
-    # Dedup + sort
-    for t in list(detected_columns.keys()):
-        detected_columns[t] = sorted(set(detected_columns[t]))
+    # t.*
+    for tbl in star_owners:
+        for c in tables_in_schema[tbl]:
+            detected_columns.setdefault(tbl, []).append(c)
+
+    # Deduplicate + sort
+    for tbl in detected_columns:
+        detected_columns[tbl] = sorted(set(detected_columns[tbl]))
 
     return {
         "tables": detected_tables,
