@@ -6,6 +6,8 @@ from core.schema_loader import load_schema
 from core.sql_generator import generate_sql, optimize_sql, extract_fields_from_query
 from core.project_store import list_projects, load_project, save_project
 from core.procedure_analyzer import explain_procedure
+
+# RAG helpers
 from core.rag_store import save_rag_files, list_rag_files, delete_rag_file, build_rag_context
 
 st.set_page_config(page_title='Datapedia', layout='wide')
@@ -19,15 +21,13 @@ if "last_optimized_sql" not in st.session_state:
     st.session_state["last_optimized_sql"] = ""
 
 # Tabs
-
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "Onboarding",
     "Project Browser",
     "SQL Generator",
     "Graph View",
-    "Procedure Analyzer"   
+    "Procedure Analyzer"
 ])
-
 
 # ------------------------------------------------------
 # 1. ONBOARDING TAB
@@ -69,6 +69,7 @@ with tab2:
         if selected_proj:
             proj = load_project(selected_proj)
             schema = load_schema(proj.get("schema", "")) if proj.get("schema") else {"tables": []}
+
             # list of tables (id/name)
             tables_raw = schema.get("tables", [])
             def _tbl_name(t):
@@ -108,6 +109,47 @@ with tab2:
                 else:
                     st.warning("Selected table not found in schema.")
 
+            # -------- RAG knowledge per project --------
+            st.subheader("RAG Knowledge (optional)")
+            schema_path = proj.get("schema", "")
+
+            rag_files = st.file_uploader(
+                "Upload RAG files (.txt, .sql)",
+                type=["txt", "sql"],
+                accept_multiple_files=True,
+                key="rag_upload"
+            )
+            if rag_files:
+                saved = save_rag_files(schema_path, rag_files)
+                if saved:
+                    st.success(f"Saved {len(saved)} file(s) to the project's RAG folder.")
+
+            existing = list_rag_files(schema_path)
+            if not existing:
+                st.info("No RAG files for this project. The AI will use only the JSON schema.")
+            else:
+                import pandas as pd
+                st.write("Existing RAG files:")
+                df_rag = pd.DataFrame(
+                    [{"file": e["name"], "size_bytes": e["size"]} for e in existing],
+                    columns=["file", "size_bytes"]
+                )
+                st.dataframe(df_rag, width="stretch", hide_index=True)
+
+                # Delete controls
+                for e in existing:
+                    c1, c2 = st.columns([0.8, 0.2])
+                    with c1:
+                        st.caption(e["name"])
+                    with c2:
+                        if st.button("Delete", key=f"del_rag_{e['name']}"):
+                            ok = delete_rag_file(schema_path, e["name"])
+                            if ok:
+                                st.success(f"Deleted: {e['name']}")
+                                st.experimental_rerun()
+                            else:
+                                st.error("Delete failed.")
+
 # ------------------------------------------------------
 # 3. SQL GENERATOR TAB
 # ------------------------------------------------------
@@ -127,7 +169,10 @@ with tab3:
         if gen_btn and selected_proj_sql:
             proj = load_project(selected_proj_sql)
             schema = load_schema(proj.get("schema", "")) if proj.get("schema") else {"tables": []}
-            result_sql = generate_sql(prompt, schema)
+            schema_path = proj.get("schema", "")
+            rag_ctx = build_rag_context(schema_path, prompt or "", max_chars=8000, k=6)
+
+            result_sql = generate_sql(prompt, schema, rag_context=rag_ctx)
             st.session_state["last_sql"] = result_sql
 
         if st.session_state.get("last_sql"):
@@ -153,7 +198,6 @@ with tab3:
                 tables_map = {(t.get("id") or t.get("name")): t for t in schema.get("tables", [])}
                 rows = []
 
-                # Dacă nu avem coloane dar avem tabele -> afișăm toate coloanele din acele tabele
                 if (not fields.get("columns")) and fields.get("tables"):
                     for tbl in fields["tables"]:
                         tdef = tables_map.get(tbl, {})
@@ -195,7 +239,10 @@ with tab3:
         if opt_btn and selected_proj_sql:
             proj = load_project(selected_proj_sql)
             schema = load_schema(proj.get("schema", "")) if proj.get("schema") else {"tables": []}
-            optimized = optimize_sql(sql_input, schema)
+            schema_path = proj.get("schema", "")
+            rag_ctx = build_rag_context(schema_path, sql_input or "", max_chars=8000, k=6)
+
+            optimized = optimize_sql(sql_input, schema, rag_context=rag_ctx)
             st.session_state["last_optimized_sql"] = optimized
 
         if st.session_state.get("last_optimized_sql"):
@@ -277,7 +324,6 @@ with tab4:
 # ------------------------------------------------------
 with tab5:
     st.header("SQL Procedure Analyzer")
-
     projs = list_projects()
     if not projs:
         st.info("No projects found. Please create one in the Onboarding tab.")
@@ -287,35 +333,33 @@ with tab5:
             [p.get("name", "") for p in projs],
             key="proc_proj"
         )
-
         st.write("Upload a SQL stored procedure or paste its content below.")
 
-        uploaded_proc = st.file_uploader(
-            "Upload .sql file",
-            type=["sql"],
-            key="proc_upload"
-        )
-
-        proc_text = st.text_area(
-            "Or paste SQL procedure here",
-            height=300,
-            key="proc_text"
-        )
-
+        uploaded_proc = st.file_uploader("Upload .sql file", type=["sql"], key="proc_upload")
+        proc_text = st.text_area("Or paste SQL procedure here", height=300, key="proc_text")
         analyze_btn = st.button("Analyze Procedure", key="analyze_proc_btn")
 
         if analyze_btn and selected_proj_proc:
             proj = load_project(selected_proj_proc)
             schema = load_schema(proj.get("schema", "")) if proj.get("schema") else {"tables": []}
+            schema_path = proj.get("schema", "")
 
             if uploaded_proc:
-                proc_code = uploaded_proc.read().decode("utf-8")
+                proc_code = uploaded_proc.read().decode("utf-8", errors="replace")
             else:
                 proc_code = proc_text
 
             if not proc_code.strip():
                 st.error("Please upload or paste a SQL procedure first.")
             else:
-                analysis = explain_procedure(proc_code, schema)
+                rag_ctx = build_rag_context(schema_path, proc_code, max_chars=8000, k=8)
+                analysis = explain_procedure(proc_code, schema, rag_context=rag_ctx)
+
                 st.subheader("AI Explanation")
-                st.write(analysis)
+                st.markdown(analysis)
+                st.download_button(
+                    "Download analysis",
+                    data=analysis.encode("utf-8"),
+                    file_name="procedure_analysis.md",
+                    mime="text/markdown"
+                )
