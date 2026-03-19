@@ -6,6 +6,7 @@ from core.schema_loader import load_schema
 from core.sql_generator import generate_sql, optimize_sql, extract_fields_from_query
 from core.project_store import list_projects, load_project, save_project
 from core.procedure_analyzer import explain_procedure
+from core.rag_store import save_rag_files, list_rag_files, delete_rag_file, build_rag_context
 
 st.set_page_config(page_title='Datapedia', layout='wide')
 
