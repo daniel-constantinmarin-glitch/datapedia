@@ -9,7 +9,7 @@ from core.project_store import list_projects, load_project, save_project
 st.set_page_config(page_title='Datapedia', layout='wide')
 
 # -----------------------------
-# Session state (pentru rerun)
+# Session state (păstrăm ultimele SQL-uri)
 # -----------------------------
 if "last_sql" not in st.session_state:
     st.session_state["last_sql"] = ""
@@ -29,14 +29,8 @@ with tab1:
         type=["json"],
         key="onb_upload"
     )
-    name = st.text_input(
-        "Project name",
-        key="onb_name"
-    )
-    create_btn = st.button(
-        "Create project",
-        key="onb_create_btn"
-    )
+    name = st.text_input("Project name", key="onb_name")
+    create_btn = st.button("Create project", key="onb_create_btn")
 
     if create_btn:
         if not upload or not name:
@@ -73,22 +67,16 @@ with tab2:
         if selected_proj:
             proj = load_project(selected_proj)
             schema = load_schema(proj.get("schema", "")) if proj.get("schema") else {"tables": []}
-            # list of tables (id/name)
+
             tables_raw = schema.get("tables", [])
             def _tbl_name(t):
                 return t.get("id") or t.get("name") or "<unnamed>"
             tables = sorted({_tbl_name(t) for t in tables_raw})
 
-            selected_table = st.selectbox(
-                "Select table",
-                tables,
-                key="browse_table"
-            )
+            selected_table = st.selectbox("Select table", tables, key="browse_table")
             if selected_table:
-                # find table object
                 table = next((t for t in tables_raw if _tbl_name(t) == selected_table), None)
                 if table:
-                    # --- Columns & Types (full-width) ---
                     st.subheader(f"Columns & Types — {selected_table}")
                     import pandas as pd
                     rows = []
@@ -110,12 +98,9 @@ with tab2:
                     else:
                         pk_cols = 0
                         nullable_cols = 0
-
-                    # IMPORTANT: width=None (fără warning)
                     st.dataframe(df, width="stretch", hide_index=True)
                     st.caption(f"Columns: **{len(df)}** · PK: **{pk_cols}** · Nullable: **{nullable_cols}**")
 
-                    # --- Full graph (no depth) ---
                     st.subheader("Table Neighborhood (FK links)")
                     render_table_neighborhood(schema, selected_table, height=760)
                 else:
@@ -138,23 +123,21 @@ with tab3:
 
         st.caption("Vertex AI uses environment variables VERTEX_PROJECT_ID / VERTEX_LOCATION / VERTEX_MODEL.")
 
-        # -------- Generate SQL from prompt --------
-        prompt = st.text_area(
-            "Describe your query in English",
-            key="sql_prompt"
-        )
-        gen_btn = st.button(
-            "Generate SQL",
-            key="sql_btn"
-        )
+        # ---- Generate SQL
+        prompt = st.text_area("Describe your query in English", key="sql_prompt")
+        gen_btn = st.button("Generate SQL", key="sql_btn")
         if gen_btn and selected_proj_sql:
             proj = load_project(selected_proj_sql)
             schema = load_schema(proj.get("schema", "")) if proj.get("schema") else {"tables": []}
             result_sql = generate_sql(prompt, schema)
-            st.session_state["last_sql"] = result_sql  # store in session
-            st.code(result_sql, language="sql")
+            st.session_state["last_sql"] = result_sql
 
-        # -------- Show fields used in generated SQL --------
+        # Afișează mereu ultimul SQL generat (nu dispare la rerun)
+        if st.session_state.get("last_sql"):
+            st.subheader("Last generated SQL")
+            st.code(st.session_state["last_sql"], language="sql")
+
+        # ---- Show fields for generated SQL
         show_fields_btn = st.button("Show fields used in query", key="sql_fields_btn")
         if show_fields_btn and selected_proj_sql:
             sql_to_inspect = st.session_state.get("last_sql", "").strip()
@@ -165,46 +148,62 @@ with tab3:
                 schema = load_schema(proj.get("schema", "")) if proj.get("schema") else {"tables": []}
                 fields = extract_fields_from_query(sql_to_inspect, schema)
 
-                # Build rich dataframe (table, column, type, nullable, pk, unique, default)
+                # Build rich dataframe using schema metadata
                 import pandas as pd
                 tables_map = {(t.get("id") or t.get("name")): t for t in schema.get("tables", [])}
                 rows = []
-                for tbl in sorted(set(fields.get("tables", []))):
-                    tdef = tables_map.get(tbl, {})
-                    coldefs = {c.get("name"): c for c in tdef.get("columns", [])}
-                    for col in sorted(set(fields.get("columns", {}).get(tbl, []))):
-                        cd = coldefs.get(col, {})
-                        rows.append({
-                            "table": tbl,
-                            "column": col,
-                            "type": cd.get("type") or cd.get("data_type") or "",
-                            "nullable": bool(cd.get("nullable")),
-                            "pk": bool(cd.get("pk") or cd.get("primary_key")),
-                            "unique": bool(cd.get("unique")),
-                            "default": cd.get("default") or ""
-                        })
+                # Dacă nu sunt coloane dar avem tabele (ex: SELECT count(*) FROM t),
+                # afișăm cel puțin tabelele (fără coloane).
+                if not fields.get("columns") and fields.get("tables"):
+                    for tbl in fields["tables"]:
+                        tdef = tables_map.get(tbl, {})
+                        for c in tdef.get("columns", []):
+                            rows.append({
+                                "table": tbl, "column": c.get("name", "?"),
+                                "type": c.get("type") or c.get("data_type") or "",
+                                "nullable": bool(c.get("nullable")),
+                                "pk": bool(c.get("pk") or c.get("primary_key")),
+                                "unique": bool(c.get("unique")),
+                                "default": c.get("default") or ""
+                            })
+                else:
+                    for tbl in sorted(set(fields.get("tables", []))):
+                        tdef = tables_map.get(tbl, {})
+                        coldefs = {c.get("name"): c for c in tdef.get("columns", [])}
+                        for col in sorted(set(fields.get("columns", {}).get(tbl, []))):
+                            cd = coldefs.get(col, {})
+                            rows.append({
+                                "table": tbl,
+                                "column": col,
+                                "type": cd.get("type") or cd.get("data_type") or "",
+                                "nullable": bool(cd.get("nullable")),
+                                "pk": bool(cd.get("pk") or cd.get("primary_key")),
+                                "unique": bool(cd.get("unique")),
+                                "default": cd.get("default") or ""
+                            })
+
                 df = pd.DataFrame(rows, columns=["table", "column", "type", "nullable", "pk", "unique", "default"])
                 if df.empty:
                     st.info("No fields detected.")
                 else:
                     st.dataframe(df, width="stretch", hide_index=True)
 
-        # -------- Optimizer --------
+        # ---- Optimizer
         st.subheader("Optimize Existing SQL")
-        sql_input = st.text_area(
-            "Paste an existing SQL query to optimize",
-            key="sql_opt_input",
-            height=200
-        )
+        sql_input = st.text_area("Paste an existing SQL query to optimize", key="sql_opt_input", height=200)
         opt_btn = st.button("Optimize SQL", key="sql_opt_btn")
         if opt_btn and selected_proj_sql:
             proj = load_project(selected_proj_sql)
             schema = load_schema(proj.get("schema", "")) if proj.get("schema") else {"tables": []}
             optimized = optimize_sql(sql_input, schema)
-            st.session_state["last_optimized_sql"] = optimized  # store in session
-            st.code(optimized, language="sql")
+            st.session_state["last_optimized_sql"] = optimized
 
-        # -------- Show fields used in optimized SQL --------
+        # Afișează mereu ultimul SQL optimizat
+        if st.session_state.get("last_optimized_sql"):
+            st.subheader("Last optimized SQL")
+            st.code(st.session_state["last_optimized_sql"], language="sql")
+
+        # ---- Show fields for optimized SQL
         show_opt_fields_btn = st.button("Show fields used in optimized query", key="sql_opt_fields_btn")
         if show_opt_fields_btn and selected_proj_sql:
             sql_to_inspect = st.session_state.get("last_optimized_sql", "").strip()
@@ -218,20 +217,34 @@ with tab3:
                 import pandas as pd
                 tables_map = {(t.get("id") or t.get("name")): t for t in schema.get("tables", [])}
                 rows = []
-                for tbl in sorted(set(fields.get("tables", []))):
-                    tdef = tables_map.get(tbl, {})
-                    coldefs = {c.get("name"): c for c in tdef.get("columns", [])}
-                    for col in sorted(set(fields.get("columns", {}).get(tbl, []))):
-                        cd = coldefs.get(col, {})
-                        rows.append({
-                            "table": tbl,
-                            "column": col,
-                            "type": cd.get("type") or cd.get("data_type") or "",
-                            "nullable": bool(cd.get("nullable")),
-                            "pk": bool(cd.get("pk") or cd.get("primary_key")),
-                            "unique": bool(cd.get("unique")),
-                            "default": cd.get("default") or ""
-                        })
+                if not fields.get("columns") and fields.get("tables"):
+                    for tbl in fields["tables"]:
+                        tdef = tables_map.get(tbl, {})
+                        for c in tdef.get("columns", []):
+                            rows.append({
+                                "table": tbl, "column": c.get("name", "?"),
+                                "type": c.get("type") or c.get("data_type") or "",
+                                "nullable": bool(c.get("nullable")),
+                                "pk": bool(c.get("pk") or c.get("primary_key")),
+                                "unique": bool(c.get("unique")),
+                                "default": c.get("default") or ""
+                            })
+                else:
+                    for tbl in sorted(set(fields.get("tables", []))):
+                        tdef = tables_map.get(tbl, {})
+                        coldefs = {c.get("name"): c for c in tdef.get("columns", [])}
+                        for col in sorted(set(fields.get("columns", {}).get(tbl, []))):
+                            cd = coldefs.get(col, {})
+                            rows.append({
+                                "table": tbl,
+                                "column": col,
+                                "type": cd.get("type") or cd.get("data_type") or "",
+                                "nullable": bool(cd.get("nullable")),
+                                "pk": bool(cd.get("pk") or cd.get("primary_key")),
+                                "unique": bool(cd.get("unique")),
+                                "default": cd.get("default") or ""
+                            })
+
                 df = pd.DataFrame(rows, columns=["table", "column", "type", "nullable", "pk", "unique", "default"])
                 if df.empty:
                     st.info("No fields detected.")
@@ -255,7 +268,6 @@ with tab4:
         if selected_proj_graph:
             proj = load_project(selected_proj_graph)
             schema = load_schema(proj.get("schema", "")) if proj.get("schema") else {"tables": []}
-            # optional: choose a table to highlight
             tables = sorted({(t.get("id") or t.get("name")) for t in schema.get("tables", []) if (t.get("id") or t.get("name"))})
             highlight = st.selectbox("Highlight table (optional)", [""] + tables, key="graph_highlight")
             render_table_neighborhood(schema, highlight, height=760)
