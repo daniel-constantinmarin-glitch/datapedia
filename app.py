@@ -315,7 +315,6 @@ with tab5:
             if not proc_code.strip():
                 st.error("Please upload or paste a SQL procedure first.")
             else:
-                from core.sql_generator import explain_procedure
                 analysis = explain_procedure(proc_code, schema)
                 st.subheader("AI Explanation")
                 st.write(analysis)
