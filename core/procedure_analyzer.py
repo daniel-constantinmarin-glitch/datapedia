@@ -67,9 +67,10 @@ def explain_procedure(proc_code: str, schema: dict) -> str:
 
     final_prompt = (
         f"{system_prompt}\n\n"
-        f"SCHEMA (only use these tables/columns for context):\n{schema_str}\n\n"
+        f"SCHEMA:\n{schema_str}\n\n"
+        f"{('' if not rag_context else rag_context + '\\n\\n')}"
         f"SQL PROCEDURE:\n{proc_code}\n"
-    )
+
 
     body = {
         "contents": [
