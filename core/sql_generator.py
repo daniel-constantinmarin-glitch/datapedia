@@ -3,6 +3,7 @@ import json
 import requests
 import google.auth
 from google.auth.transport.requests import Request
+import re
 
 
 def build_schema_summary(schema: dict) -> str:
@@ -16,7 +17,6 @@ def build_schema_summary(schema: dict) -> str:
 
 
 def generate_sql(prompt: str, schema: dict) -> str:
-    # 1. Token using VM service account
     try:
         creds, _ = google.auth.default()
         creds.refresh(Request())
@@ -24,7 +24,6 @@ def generate_sql(prompt: str, schema: dict) -> str:
     except Exception as e:
         return f"-- ERROR while obtaining access token: {e}"
 
-    # 2. Required env vars
     project_id = os.getenv("VERTEX_PROJECT_ID", "datapedia-489407")
     location = os.getenv("VERTEX_LOCATION", "us-central1")
     model = os.getenv("VERTEX_MODEL", "gemini-2.5-pro")
@@ -35,7 +34,6 @@ def generate_sql(prompt: str, schema: dict) -> str:
             "Set VERTEX_PROJECT_ID, VERTEX_LOCATION."
         )
 
-    # 3. REST endpoint
     url = (
         f"https://{location}-aiplatform.googleapis.com/v1/"
         f"projects/{project_id}/locations/{location}/"
@@ -59,18 +57,14 @@ def generate_sql(prompt: str, schema: dict) -> str:
         f"USER REQUEST:\n{prompt}\n"
     )
 
-    
     body = {
         "contents": [
             {
                 "role": "user",
-                "parts": [
-                    {"text": final_prompt}
-                ]
+                "parts": [{"text": final_prompt}]
             }
         ]
     }
-
 
     headers = {
         "Authorization": f"Bearer {token}",
@@ -82,8 +76,8 @@ def generate_sql(prompt: str, schema: dict) -> str:
         r.raise_for_status()
 
         response = r.json()
-
         text = response["candidates"][0]["content"]["parts"][0].get("text", "").strip()
+
         if not text:
             return "-- ERROR: Empty response from Vertex AI."
 
@@ -95,8 +89,8 @@ def generate_sql(prompt: str, schema: dict) -> str:
     except Exception as e:
         return f"-- ERROR calling Vertex AI: {e}\nRAW RESPONSE: {r.text if 'r' in locals() else ''}"
 
+
 def optimize_sql(query: str, schema: dict) -> str:
-    # 1. Token using VM service account
     try:
         creds, _ = google.auth.default()
         creds.refresh(Request())
@@ -154,50 +148,58 @@ def optimize_sql(query: str, schema: dict) -> str:
         text = response["candidates"][0]["content"]["parts"][0].get("text", "").strip()
 
         if not text:
-            return query  # fallback
+            return query
 
         return text
 
     except Exception as e:
         return f"-- ERROR calling Vertex AI: {e}"
 
-import re
+
+# ==========================
+# FIELD EXTRACTOR (PATCHED)
+# ==========================
 
 def extract_fields_from_query(query: str, schema: dict) -> dict:
     """
-    Parse SQL and extract tables and columns actually used.
-    Returns:
-       {
-          "tables": [...],
-          "columns": { "table": [col1, col2, ...], ... }
-       }
+    Detect tables, aliases and columns used in a SQL query.
+    Returns dict:
+        {
+            "tables": [...],
+            "columns": { "table": [col1, col2] }
+        }
     """
     tables_in_schema = {
         (t.get("id") or t.get("name")): [c.get("name") for c in t.get("columns", [])]
         for t in schema.get("tables", [])
+        if (t.get("id") or t.get("name"))
     }
 
+    alias_map = {}
     detected_tables = set()
     detected_columns = {}
 
-    # Detect tables used in FROM / JOIN
-    table_regex = r"(?:FROM|JOIN)\s+([a-zA-Z0-9_\.]+)"
-    for tbl in re.findall(table_regex, query, flags=re.IGNORECASE):
-        base = tbl.split(".")[-1]
+    # FROM / JOIN detection with aliases
+    from_join_regex = r"(?:FROM|JOIN)\s+([a-zA-Z0-9_\.]+)(?:\s+AS)?\s+([a-zA-Z0-9_]+)?"
+    for base_tbl, alias in re.findall(from_join_regex, query, flags=re.IGNORECASE):
+        base = base_tbl.split(".")[-1]
         if base in tables_in_schema:
             detected_tables.add(base)
+            if alias and alias.lower() != base.lower():
+                alias_map[alias] = base
 
-    # Extract all tokens that could be columns
-    col_regex = r"[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+"
-    for token in re.findall(col_regex, query):
-        tbl, col = token.split(".")
-        if tbl in tables_in_schema and col in tables_in_schema[tbl]:
-            if tbl not in detected_columns:
-                detected_columns[tbl] = []
-            detected_columns[tbl].append(col)
+    # Detect qualified columns t.col
+    qual_col_regex = r"([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)"
+    for tbl_or_alias, col in re.findall(qual_col_regex, query):
+        actual_tbl = alias_map.get(tbl_or_alias, tbl_or_alias)
+        if actual_tbl in tables_in_schema and col in tables_in_schema[actual_tbl]:
+            detected_columns.setdefault(actual_tbl, []).append(col)
+
+    # Deduplicate
+    for t in detected_columns:
+        detected_columns[t] = sorted(set(detected_columns[t]))
 
     return {
-        "tables": sorted(list(detected_tables)),
+        "tables": sorted(detected_tables),
         "columns": detected_columns
     }
-
