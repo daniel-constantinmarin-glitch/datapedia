@@ -1,5 +1,7 @@
 import streamlit as st
 import os
+import json
+import requests
 
 from core.graph_builder import render_table_neighborhood
 from core.schema_loader import load_schema
@@ -11,6 +13,81 @@ from core.procedure_analyzer import explain_procedure
 from core.rag_store import save_rag_files, list_rag_files, delete_rag_file, build_rag_context
 
 st.set_page_config(page_title='Datapedia', layout='wide')
+
+# =============================================================================
+# Data Firewall / LLM Proxy helpers (client HTTP inlined in this file)
+# =============================================================================
+
+DEFAULT_PROXY_TIMEOUT = (5, 30)  # connect, read
+
+def _proxy_read_info(schema_path: str) -> dict:
+    """
+    Load Data Firewall settings (url, token) from proxy.json located
+    in the same folder as the project's schema file.
+    Falls back to env vars SAFE_PROXY_URL / SAFE_PROXY_TOKEN.
+    """
+    info = {"url": None, "token": None}
+    if schema_path:
+        folder = os.path.dirname(schema_path)
+        proxy_path = os.path.join(folder, "proxy.json")
+        if os.path.isfile(proxy_path):
+            try:
+                with open(proxy_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    info["url"] = data.get("url")
+                    info["token"] = data.get("token")
+            except Exception:
+                pass
+
+    if not info["url"]:
+        info["url"] = os.getenv("SAFE_PROXY_URL")
+    if not info["token"]:
+        info["token"] = os.getenv("SAFE_PROXY_TOKEN")
+    return info
+
+def _proxy_save_info(schema_path: str, url: str, token: str|None) -> str:
+    """
+    Write proxy.json next to the schema file.
+    """
+    folder = os.path.dirname(schema_path)
+    os.makedirs(folder, exist_ok=True)
+    proxy_path = os.path.join(folder, "proxy.json")
+    with open(proxy_path, "w", encoding="utf-8") as f:
+        json.dump({"url": url, "token": (token or None)}, f, indent=2)
+    return proxy_path
+
+def _proxy_headers(token: str|None) -> dict:
+    h = {"Content-Type": "application/json"}
+    if token:
+        h["Authorization"] = f"Bearer {token}"
+    return h
+
+def _proxy_endpoint(base_url: str, path: str) -> str:
+    return base_url.rstrip("/") + path
+
+def _proxy_post(schema_path: str, endpoint: str, payload: dict, timeout=DEFAULT_PROXY_TIMEOUT) -> dict:
+    info = _proxy_read_info(schema_path)
+    if not info["url"]:
+        return {"ok": False, "error": "No Data Firewall URL configured for this project."}
+    try:
+        url = _proxy_endpoint(info["url"], endpoint)
+        r = requests.post(url, headers=_proxy_headers(info["token"]), json=payload, timeout=timeout)
+        if not r.ok:
+            return {"ok": False, "error": r.text}
+        data = r.json()
+        data["ok"] = True
+        return data
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+def proxy_validate_sql(schema_path: str, sql: str) -> dict:
+    return _proxy_post(schema_path, "/validate_sql", {"sql": sql})
+
+def proxy_explain_sql(schema_path: str, sql: str) -> dict:
+    return _proxy_post(schema_path, "/explain_sql", {"sql": sql})
+
+def proxy_safe_query(schema_path: str, sql: str) -> dict:
+    return _proxy_post(schema_path, "/safe_query", {"sql": sql})
 
 # -----------------------------
 # Session state
@@ -36,8 +113,16 @@ with tab1:
     st.header("Project Onboarding")
     upload = st.file_uploader("Upload JSON schema (max 5MB)", type=["json"], key="onb_upload")
     name = st.text_input("Project name", key="onb_name")
-    create_btn = st.button("Create project", key="onb_create_btn")
 
+    # NEW: Data Firewall settings (optional, recommended)
+    st.subheader("Data Firewall (optional, recommended)")
+    df_col1, df_col2 = st.columns(2)
+    with df_col1:
+        proxy_url = st.text_input("Proxy URL (internal)", placeholder="http://10.128.0.7:9000", key="onb_proxy_url")
+    with df_col2:
+        proxy_token = st.text_input("Proxy Token (optional)", type="password", key="onb_proxy_token")
+
+    create_btn = st.button("Create project", key="onb_create_btn")
     if create_btn:
         if not upload or not name:
             st.error("Please provide both a JSON schema and a project name.")
@@ -52,7 +137,14 @@ with tab1:
                 with open(path, "wb") as f:
                     f.write(upload.getbuffer())
                 save_project(name, path)
-                st.success("Project created successfully!")
+
+                # Save Data Firewall settings per project (proxy.json)
+                if proxy_url.strip():
+                    ppath = _proxy_save_info(path, proxy_url.strip(), proxy_token.strip() if proxy_token else None)
+                    st.success(f"Project created and Data Firewall configured: {ppath}")
+                else:
+                    st.success("Project created successfully (no Data Firewall configured).")
+
             except Exception as e:
                 st.error(f"Error saving project: {e}")
 
@@ -150,6 +242,25 @@ with tab2:
                             else:
                                 st.error("Delete failed.")
 
+            # -------- Data Firewall settings per project --------
+            st.subheader("Data Firewall (per project)")
+
+            info = _proxy_read_info(schema_path)
+            dfcol1, dfcol2 = st.columns(2)
+            with dfcol1:
+                edit_proxy_url = st.text_input("Proxy URL (internal)", value=(info["url"] or ""), placeholder="http://10.128.0.7:9000", key="edit_proxy_url")
+            with dfcol2:
+                edit_proxy_token = st.text_input("Proxy Token (optional)", value=(info["token"] or ""), type="password", key="edit_proxy_token")
+
+            if st.button("Save Data Firewall settings", key="btn_save_proxy"):
+                if not schema_path:
+                    st.error("This project has no schema path.")
+                elif not edit_proxy_url.strip():
+                    st.error("Proxy URL cannot be empty.")
+                else:
+                    ppath = _proxy_save_info(schema_path, edit_proxy_url.strip(), edit_proxy_token.strip() if edit_proxy_token else None)
+                    st.success(f"Saved: {ppath}")
+
 # ------------------------------------------------------
 # 3. SQL GENERATOR TAB
 # ------------------------------------------------------
@@ -160,7 +271,6 @@ with tab3:
         st.info("No projects found. Please create one in the Onboarding tab.")
     else:
         selected_proj_sql = st.selectbox("Select project", [p.get("name", "") for p in projs], key="sql_proj")
-
         st.caption("Vertex AI uses environment variables VERTEX_PROJECT_ID / VERTEX_LOCATION / VERTEX_MODEL.")
 
         # Generate
@@ -171,13 +281,51 @@ with tab3:
             schema = load_schema(proj.get("schema", "")) if proj.get("schema") else {"tables": []}
             schema_path = proj.get("schema", "")
             rag_ctx = build_rag_context(schema_path, prompt or "", max_chars=8000, k=6)
-
             result_sql = generate_sql(prompt, schema, rag_context=rag_ctx)
             st.session_state["last_sql"] = result_sql
 
         if st.session_state.get("last_sql"):
             st.subheader("Last generated SQL")
             st.code(st.session_state["last_sql"], language="sql")
+
+            # NEW: Data Firewall actions
+            proj = load_project(selected_proj_sql)
+            schema_path = proj.get("schema", "")
+
+            c1, c2, c3 = st.columns(3)
+            sql_current = st.session_state.get("last_sql", "").strip()
+
+            with c1:
+                if st.button("Validate (Firewall)", key="btn_val"):
+                    resp = proxy_validate_sql(schema_path, sql_current)
+                    if not resp.get("ok"):
+                        st.error(resp.get("error", "Validation error"))
+                    else:
+                        st.success("SQL validated successfully under policy.")
+                        st.json(resp)
+
+            with c2:
+                if st.button("Explain (Firewall)", key="btn_explain"):
+                    resp = proxy_explain_sql(schema_path, sql_current)
+                    if not resp.get("ok"):
+                        st.error(resp.get("error", "Explain error"))
+                    else:
+                        st.json(resp)
+
+            with c3:
+                if st.button("Run via Data Firewall", key="btn_run"):
+                    resp = proxy_safe_query(schema_path, sql_current)
+                    if not resp.get("ok"):
+                        st.error(resp.get("error", "Execution error"))
+                    else:
+                        st.success(f"Rows: {resp.get('row_count', 0)}")
+                        import pandas as pd
+                        rows = resp.get("rows", [])
+                        if rows:
+                            df = pd.DataFrame(rows)
+                            st.dataframe(df, use_container_width=True)
+                        st.caption("Executed SQL (with enforced limit):")
+                        st.code(resp.get("executed_sql", ""), language="sql")
 
         # Show fields (generated)
         show_fields_btn = st.button("Show fields used in query", key="sql_fields_btn")
@@ -189,7 +337,6 @@ with tab3:
                 proj = load_project(selected_proj_sql)
                 schema = load_schema(proj.get("schema", "")) if proj.get("schema") else {"tables": []}
                 fields = extract_fields_from_query(sql_to_inspect, schema)
-
                 with st.expander("Debug (parser)"):
                     st.write("Detected tables:", fields.get("tables"))
                     st.write("Detected columns:", fields.get("columns"))
@@ -197,7 +344,7 @@ with tab3:
                 import pandas as pd
                 tables_map = {(t.get("id") or t.get("name")): t for t in schema.get("tables", [])}
                 rows = []
-
+                # If no columns but there are tables -> list all columns of those tables
                 if (not fields.get("columns")) and fields.get("tables"):
                     for tbl in fields["tables"]:
                         tdef = tables_map.get(tbl, {})
@@ -225,7 +372,6 @@ with tab3:
                                 "unique": bool(cd.get("unique")),
                                 "default": cd.get("default") or ""
                             })
-
                 df = pd.DataFrame(rows, columns=["table","column","type","nullable","pk","unique","default"])
                 if df.empty:
                     st.info("No fields detected.")
@@ -241,7 +387,6 @@ with tab3:
             schema = load_schema(proj.get("schema", "")) if proj.get("schema") else {"tables": []}
             schema_path = proj.get("schema", "")
             rag_ctx = build_rag_context(schema_path, sql_input or "", max_chars=8000, k=6)
-
             optimized = optimize_sql(sql_input, schema, rag_context=rag_ctx)
             st.session_state["last_optimized_sql"] = optimized
 
@@ -259,7 +404,6 @@ with tab3:
                 proj = load_project(selected_proj_sql)
                 schema = load_schema(proj.get("schema", "")) if proj.get("schema") else {"tables": []}
                 fields = extract_fields_from_query(sql_to_inspect, schema)
-
                 with st.expander("Debug (parser)"):
                     st.write("Detected tables:", fields.get("tables"))
                     st.write("Detected columns:", fields.get("columns"))
@@ -267,7 +411,6 @@ with tab3:
                 import pandas as pd
                 tables_map = {(t.get("id") or t.get("name")): t for t in schema.get("tables", [])}
                 rows = []
-
                 if (not fields.get("columns")) and fields.get("tables"):
                     for tbl in fields["tables"]:
                         tdef = tables_map.get(tbl, {})
@@ -295,7 +438,6 @@ with tab3:
                                 "unique": bool(cd.get("unique")),
                                 "default": cd.get("default") or ""
                             })
-
                 df = pd.DataFrame(rows, columns=["table","column","type","nullable","pk","unique","default"])
                 if df.empty:
                     st.info("No fields detected.")
@@ -316,7 +458,7 @@ with tab4:
             proj = load_project(selected_proj_graph)
             schema = load_schema(proj.get("schema", "")) if proj.get("schema") else {"tables": []}
             tables = sorted({(t.get("id") or t.get("name")) for t in schema.get("tables", []) if (t.get("id") or t.get("name"))})
-            highlight = st.selectbox("Highlight table (optional)", [""] + tables, key="graph_highlight")
+            highlight = st.selectbox("Highlight table (optional)", [""] + list(tables), key="graph_highlight")
             render_table_neighborhood(schema, highlight, height=760)
 
 # ------------------------------------------------------
@@ -334,7 +476,6 @@ with tab5:
             key="proc_proj"
         )
         st.write("Upload a SQL stored procedure or paste its content below.")
-
         uploaded_proc = st.file_uploader("Upload .sql file", type=["sql"], key="proc_upload")
         proc_text = st.text_area("Or paste SQL procedure here", height=300, key="proc_text")
         analyze_btn = st.button("Analyze Procedure", key="analyze_proc_btn")
