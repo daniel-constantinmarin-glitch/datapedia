@@ -2,5 +2,13 @@
   {
     "name": "Cars",
     "schema": "/home/daniel_constantin_marin_ing_com/Cars/schema.json"
-  }
+  },
+  {
+    "name": "Bank",
+    "schema": "/home/daniel_constantin_marin_ing_com/Bank/bank_schema_metadata.json"
+  },
+  {
+    "name": "MCO",
+    "schema": "/home/daniel_constantin_marin_ing_com/MCO/mco_50tables.json"
+  },
 ]
