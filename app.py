@@ -46,6 +46,20 @@ st.markdown("""
     header[data-testid="stHeader"] > div {
         background: #ff6600 !important;
     }
+    
+    /* Containerul logo-ului */
+    .navbar-logo {
+        display: flex;
+        align-items: left;
+        height: 70px;
+        padding-left: 10px;
+    }
+    </style>
+
+    <div class="navbar-logo">
+        <img src="static/datapedia_logo.png" height="40">
+    </div>
+
 
     /* Dacă există text în header, îl facem alb */
     header[data-testid="stHeader"] * {
