@@ -35,6 +35,27 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
+st.markdown("""
+    <style>
+    /* NAVBAR (header-ul Streamlit) */
+    header[data-testid="stHeader"] {
+        background-color: #ff6600 !important;   /* portocaliul butoanelor */
+    }
+
+    /* Elimină gradientul default al Streamlit */
+    header[data-testid="stHeader"] > div {
+        background: #ff6600 !important;
+    }
+
+    /* Dacă există text în header, îl facem alb */
+    header[data-testid="stHeader"] * {
+        color: white !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+
+
 # =============================================================================
 # Data Firewall / LLM Proxy helpers (client HTTP inlined in this file)
 # =============================================================================
