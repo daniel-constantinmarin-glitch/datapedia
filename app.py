@@ -40,7 +40,7 @@ st.markdown("""
     /* NAVBAR Streamlit */
     header[data-testid="stHeader"] {
         background-color: #ff6600 !important;
-        height: 70px;
+        height: 50px;
     }
 
     /* Eliminăm paddingurile interne ale header-ului */
