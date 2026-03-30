@@ -152,7 +152,7 @@ with st.container():
     st.markdown(
         """
         <div style='display: flex; align-items: center; gap: 12px; padding: 10px 0;'>
-            static/datapedia_logo.png
+            /static/datapedia_logo.png
             <span style='font-size: 32px; font-weight: 700; color: #ff6600;'>
                 Datapedia
             </span>
