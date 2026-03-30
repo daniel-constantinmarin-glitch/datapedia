@@ -14,6 +14,27 @@ from core.rag_store import save_rag_files, list_rag_files, delete_rag_file, buil
 
 st.set_page_config(page_title='Datapedia', layout='wide')
 
+
+st.markdown("""
+    <style>
+    /* Stil pentru toate st.button */
+    div.stButton > button {
+        background-color: #ff6600;
+        color: white;
+        border-radius: 6px;
+        padding: 0.6rem 1.2rem;
+        font-weight: 600;
+        border: none;
+    }
+
+    div.stButton > button:hover {
+        background-color: #e65c00;
+        color: white;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+
 # =============================================================================
 # Data Firewall / LLM Proxy helpers (client HTTP inlined in this file)
 # =============================================================================
