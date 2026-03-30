@@ -40,6 +40,7 @@ st.markdown("""
     /* NAVBAR (header-ul Streamlit) */
     header[data-testid="stHeader"] {
         background-color: #ff6600 !important;   /* portocaliul butoanelor */
+        height: 60px;
     }
 
     /* Elimină gradientul default al Streamlit */
