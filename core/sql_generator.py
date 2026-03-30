@@ -17,10 +17,21 @@ _SQL_KW = {
 
 def _strip_code_fences(q: str) -> str:
     """Remove ```sql ... ``` or ``` ... ``` fences."""
+
     q = q.strip()
-    q = re.sub(r"^\s*```(?:sql)?\s*", "", q, flags=re.IGNORECASE)
+
+    # Elimină ```sql sau ```SQL
+    q = re.sub(r"^\s*```(?:sql|SQL)\s*", "", q)
+
+    # Elimină ``` la final
     q = re.sub(r"\s*```\s*$", "", q)
-    return q
+
+    # Elimină și cazul în care pune ``` și la final și la început fără sql
+    q = re.sub(r"^\s*```\s*", "", q)
+    q = re.sub(r"\s*```\s*$", "", q)
+
+    return q.strip()
+
 
 def _clean_ident(s: str) -> str:
     """Remove quotes/backticks/brackets and return last part after dot (schema.table -> table). Lower-case."""
@@ -162,7 +173,9 @@ def generate_sql(prompt: str, schema: dict, rag_context: str = "") -> str:
             return "-- ERROR: Empty response from Vertex AI."
         if "NO_DATA" in text.upper():
             return "NO_DATA"
-        return text
+        clean_text = _strip_code_fences(text)
+        return clean_text
+
     except Exception as e:
         return f"-- ERROR calling Vertex AI: {e}\nRAW RESPONSE: {r.text if 'r' in locals() else ''}"
 
