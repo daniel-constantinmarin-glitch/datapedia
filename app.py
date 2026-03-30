@@ -520,7 +520,7 @@ with tab4:
             schema = load_schema(proj.get("schema", "")) if proj.get("schema") else {"tables": []}
             tables = sorted({(t.get("id") or t.get("name")) for t in schema.get("tables", []) if (t.get("id") or t.get("name"))})
             highlight = st.selectbox("Highlight table (optional)", [""] + list(tables), key="graph_highlight")
-            render_table_neighborhood(schema, highlight, height=760, use_container_width=True)
+            render_table_neighborhood(schema, highlight, height=760)
 
 # ------------------------------------------------------
 # 5. PROCEDURE ANALYZER TAB
