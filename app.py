@@ -333,40 +333,57 @@ with tab3:
             proj = load_project(selected_proj_sql)
             schema_path = proj.get("schema", "")
 
-            c1, c2, c3 = st.columns(3)
-            sql_current = st.session_state.get("last_sql", "").strip()
+            
+            # -------------------------
+            # 1. VALIDATE (FIREWALL)
+            # -------------------------
+            if st.button("Validate (Firewall)", key="btn_val", use_container_width=True):
+                resp = proxy_validate_sql(schema_path, sql_current)
+            
+                if not resp.get("ok"):
+                    st.error(resp.get("error", "Validation error"))
+                else:
+                    st.success("SQL validated successfully under policy.")
+                    st.json(resp)
+            
+            st.write("")  # spațiu între butoane
+            
+            
+            # -------------------------
+            # 2. EXPLAIN (FIREWALL)
+            # -------------------------
+            if st.button("Explain (Firewall)", key="btn_explain", use_container_width=True):
+                resp = proxy_explain_sql(schema_path, sql_current)
+            
+                if not resp.get("ok"):
+                    st.error(resp.get("error", "Explain error"))
+                else:
+                    st.json(resp)
+            
+            st.write("")  # spațiu între butoane
+            
+            
+            # -------------------------
+            # 3. RUN (SAFE QUERY)
+            # -------------------------
+            if st.button("Run via Data Firewall", key="btn_run", use_container_width=True):
+                resp = proxy_safe_query(schema_path, sql_current)
+            
+                if not resp.get("ok"):
+                    st.error(resp.get("error", "Execution error"))
+                else:
+                    st.success(f"Rows: {resp.get('row_count', 0)}")
+            
+                    import pandas as pd
+                    rows = resp.get("rows", [])
+            
+                    if rows:
+                        df = pd.DataFrame(rows)
+                        st.dataframe(df, use_container_width=True)
+            
+                    st.caption("Executed SQL (with enforced limit):")
+                    st.code(resp.get("executed_sql", ""), language="sql")
 
-            with c1:
-                if st.button("Validate (Firewall)", key="btn_val"):
-                    resp = proxy_validate_sql(schema_path, sql_current)
-                    if not resp.get("ok"):
-                        st.error(resp.get("error", "Validation error"))
-                    else:
-                        st.success("SQL validated successfully under policy.")
-                        st.json(resp)
-
-            with c2:
-                if st.button("Explain (Firewall)", key="btn_explain"):
-                    resp = proxy_explain_sql(schema_path, sql_current)
-                    if not resp.get("ok"):
-                        st.error(resp.get("error", "Explain error"))
-                    else:
-                        st.json(resp)
-
-            with c3:
-                if st.button("Run via Data Firewall", key="btn_run"):
-                    resp = proxy_safe_query(schema_path, sql_current)
-                    if not resp.get("ok"):
-                        st.error(resp.get("error", "Execution error"))
-                    else:
-                        st.success(f"Rows: {resp.get('row_count', 0)}")
-                        import pandas as pd
-                        rows = resp.get("rows", [])
-                        if rows:
-                            df = pd.DataFrame(rows)
-                            st.dataframe(df, use_container_width=True)
-                        st.caption("Executed SQL (with enforced limit):")
-                        st.code(resp.get("executed_sql", ""), language="sql")
 
         # Show fields (generated)
         show_fields_btn = st.button("Show fields used in query", key="sql_fields_btn")
