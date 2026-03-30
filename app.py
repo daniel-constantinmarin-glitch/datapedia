@@ -147,6 +147,21 @@ if "last_sql" not in st.session_state:
 if "last_optimized_sql" not in st.session_state:
     st.session_state["last_optimized_sql"] = ""
 
+
+with st.container():
+    st.markdown(
+        """
+        <div style='display: flex; align-items: center; gap: 12px; padding: 10px 0;'>
+            static/datapedia_logo.png
+            <span style='font-size: 32px; font-weight: 700; color: #ff6600;'>
+                Datapedia
+            </span>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+
 # Tabs
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "Onboarding",
