@@ -148,18 +148,22 @@ if "last_optimized_sql" not in st.session_state:
     st.session_state["last_optimized_sql"] = ""
 
 
-with st.container():
-    st.markdown(
-        """
-        <div style='display: flex; align-items: center; gap: 12px; padding: 10px 0;'>
-            /static/datapedia_logo.png
-            <span style='font-size: 32px; font-weight: 700; color: #ff6600;'>
-                Datapedia
-            </span>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+st.markdown("""
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700&display=swap" rel="stylesheet">
+
+    <style>
+        .app-title {
+            font-family: 'Poppins', sans-serif;
+            font-size: 36px;
+            font-weight: 700;
+            color: #ff6600;
+            padding: 15px 0 5px 0;
+        }
+    </style>
+
+    <div class="app-title">Datapedia</div>
+""", unsafe_allow_html=True)
+
 
 
 # Tabs
