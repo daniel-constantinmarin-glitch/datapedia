@@ -48,19 +48,10 @@ st.markdown("""
         padding-top: 0px !important;
     }
 
-    /* LOGO în navbar */
-    .navbar-logo {
-        position: absolute;
-        top: 10px;          /* ajustează vertical */
-        left: 20px;         /* ajustează orizontal */
-        height: 50px;
-        z-index: 9999;
-    }
 
     </style>
 
-    <!-- Inserăm imaginea în header prin poziționare absolută -->
-    <img class="navbar-logo" src="static/datapedia_logo.png" height="50">
+  
 """, unsafe_allow_html=True)
 
 
