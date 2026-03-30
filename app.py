@@ -334,6 +334,9 @@ with tab3:
             schema_path = proj.get("schema", "")
 
             
+            sql_current = st.session_state.get("last_sql", "").strip()
+
+            
             # -------------------------
             # 1. VALIDATE (FIREWALL)
             # -------------------------
