@@ -40,7 +40,7 @@ st.markdown("""
     /* NAVBAR (header-ul Streamlit) */
     header[data-testid="stHeader"] {
         background-color: #ff6600 !important;   /* portocaliul butoanelor */
-        height: 60px;
+        height: 70px;
     }
 
     /* Elimină gradientul default al Streamlit */
@@ -52,8 +52,8 @@ st.markdown("""
     .navbar-logo {
         display: flex;
         align-items: left;
-        height: 50px;
-        padding-left: 10px;
+        height: 70px;
+        padding-left: 20px;
     }
     </style>
 
