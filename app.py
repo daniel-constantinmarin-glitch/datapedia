@@ -147,25 +147,6 @@ if "last_sql" not in st.session_state:
 if "last_optimized_sql" not in st.session_state:
     st.session_state["last_optimized_sql"] = ""
 
-
-st.markdown("""
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700&display=swap" rel="stylesheet">
-
-    <style>
-        .app-title {
-            font-family: 'Poppins', sans-serif;
-            font-size: 36px;
-            font-weight: 700;
-            color: #ff6600;
-            padding: 15px 0 5px 0;
-        }
-    </style>
-
-    <div class="app-title">Datapedia</div>
-""", unsafe_allow_html=True)
-
-
-
 # Tabs
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "Onboarding",
