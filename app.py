@@ -51,7 +51,7 @@ st.markdown("""
     .navbar-logo {
         display: flex;
         align-items: left;
-        height: 70px;
+        height: 50px;
         padding-left: 10px;
     }
     </style>
