@@ -37,38 +37,31 @@ st.markdown("""
 
 st.markdown("""
     <style>
-    /* NAVBAR (header-ul Streamlit) */
+    /* NAVBAR Streamlit */
     header[data-testid="stHeader"] {
-        background-color: #ff6600 !important;   /* portocaliul butoanelor */
+        background-color: #ff6600 !important;
         height: 70px;
     }
 
-    /* Elimină gradientul default al Streamlit */
-    header[data-testid="stHeader"] > div {
-        background: #ff6600 !important;
+    /* Eliminăm paddingurile interne ale header-ului */
+    header[data-testid="stHeader"] > div:first-child {
+        padding-top: 0px !important;
     }
-    
-    /* Containerul logo-ului */
+
+    /* LOGO în navbar */
     .navbar-logo {
-        display: flex;
-        align-items: left;
-        height: 70px;
-        padding-left: 20px;
+        position: absolute;
+        top: 10px;          /* ajustează vertical */
+        left: 20px;         /* ajustează orizontal */
+        height: 50px;
+        z-index: 9999;
     }
+
     </style>
 
-    <div class="navbar-logo">
-        <img src="static/datapedia_logo.png" height="40">
-    </div>
-
-
-    /* Dacă există text în header, îl facem alb */
-    header[data-testid="stHeader"] * {
-        color: white !important;
-    }
-    </style>
+    <!-- Inserăm imaginea în header prin poziționare absolută -->
+    <img class="navbar-logo" src="static/datapedia_logo.png" height="50">
 """, unsafe_allow_html=True)
-
 
 
 # =============================================================================
