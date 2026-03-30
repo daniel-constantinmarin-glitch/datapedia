@@ -12,7 +12,7 @@ from core.procedure_analyzer import explain_procedure
 # RAG helpers
 from core.rag_store import save_rag_files, list_rag_files, delete_rag_file, build_rag_context
 
-st.set_page_config(page_title='Datapedia', layout='wide')
+st.set_page_config(page_title='Datapedia', layout='centre')
 
 
 st.markdown("""
