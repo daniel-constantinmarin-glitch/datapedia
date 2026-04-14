@@ -182,7 +182,7 @@ with tab1:
                 # Save Data Firewall settings per project (proxy.json)
                 if proxy_url.strip():
                     ppath = _proxy_save_info(path, proxy_url.strip(), proxy_token.strip() if proxy_token else None)
-                    st.success(f"Project created and Data Firewall configured: {ppath}")
+                    st.success(f"Project created and Data Firewall configured.")
                 else:
                     st.success("Project created successfully (no Data Firewall configured).")
 
